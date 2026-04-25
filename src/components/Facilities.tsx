@@ -3,8 +3,10 @@ import { Plus, Trash2, MapPin, SlidersHorizontal, UserPlus, AlertCircle, Edit2, 
 import { motion, AnimatePresence } from 'motion/react';
 import { Facility, CustomQuota } from '../types';
 import FacilitySelect from './FacilitySelect';
+import { useRole } from '../contexts/RoleContext';
 
 export default function Facilities({ state }: { state: ReturnType<typeof import('../useAppState').useAppState> }) {
+  const { role } = useRole();
   const { facilities, facilityTypes, globalDefaultQuotas, addFacility, updateFacility, deleteFacility, staffEntries, positionsList, addStaff, updateStaff } = state;
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isRecruitOpen, setIsRecruitOpen] = useState(false);
@@ -246,9 +248,11 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
               >
                 <ChevronRight className={`w-5 h-5 transition-transform ${isCardExpanded ? 'rotate-90' : ''}`} />
               </button>
-              <button onClick={() => openEditFacility(f)} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all opacity-0 group-hover:opacity-100">
-                <MoreVertical className="w-4 h-4" />
-              </button>
+              {role !== 'viewer' && (
+                <button onClick={() => openEditFacility(f)} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all opacity-0 group-hover:opacity-100">
+                  <MoreVertical className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
 
@@ -339,63 +343,79 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                                 </div>
                                 
                                 <div className="flex items-center gap-2 shrink-0">
-                                  <button onClick={() => {
-                                    openRecruit(f.id, q.position);
-                                    setREditingStaffId(staff.id);
-                                    setRIsExternal(staff.facilityId === -1);
-                                    if (staff.facilityId !== -1 && staff.facilityId !== f.id) {
-                                      setRSourceFac(staff.facilityId.toString());
-                                    }
-                                    if (staff.facilityId === -1) {
-                                      setRExtName(staff.externalFacilityName || '');
-                                    }
-                                    setRDuty(staff.dutyStatus === 'Attached' ? 'attach' : 'main');
-                                    setRReason(staff.reason || '');
-                                    setRActiveStatus(staff.activeStatus || 'Active');
-                                    setRActiveReason(staff.activeReason || '');
-                                  }} className="p-2 bg-slate-50 text-slate-400 border border-slate-200 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 transition-all opacity-0 group-hover/staff:opacity-100" title="Edit">
-                                    <Edit2 className="w-3.5 h-3.5" />
-                                  </button>
+                                  {role !== 'viewer' && (
+                                    <>
+                                      <button onClick={() => {
+                                        openRecruit(f.id, q.position);
+                                        setREditingStaffId(staff.id);
+                                        setRIsExternal(staff.facilityId === -1);
+                                        if (staff.facilityId !== -1 && staff.facilityId !== f.id) {
+                                          setRSourceFac(staff.facilityId.toString());
+                                        }
+                                        if (staff.facilityId === -1) {
+                                          setRExtName(staff.externalFacilityName || '');
+                                        }
+                                        setRDuty(staff.dutyStatus === 'Attached' ? 'attach' : 'main');
+                                        setRReason(staff.reason || '');
+                                        setRActiveStatus(staff.activeStatus || 'Active');
+                                        setRActiveReason(staff.activeReason || '');
+                                      }} className="p-2 bg-slate-50 text-slate-400 border border-slate-200 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 transition-all opacity-0 group-hover/staff:opacity-100" title="Edit">
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </button>
+                                      
+                                      {!staff.cv ? (
+                                        <label className="cursor-pointer p-2 bg-slate-50 border border-slate-200 text-slate-400 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 transition-all opacity-0 group-hover/staff:opacity-100" title="Upload CV">
+                                          <input type="file" className="hidden" accept=".pdf,.doc,.docx,image/*" onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) {
+                                              if (file.size > 2 * 1024 * 1024) {
+                                                alert('File is too large. Please upload a file smaller than 2MB.');
+                                                return;
+                                              }
+                                              const reader = new FileReader();
+                                              reader.onloadend = () => {
+                                                const updated = { ...staff, cv: file.name, cvDataUrl: reader.result as string };
+                                                updateStaff(updated);
+                                              };
+                                              reader.readAsDataURL(file);
+                                            }
+                                            e.target.value = '';
+                                          }} />
+                                          <Plus className="w-3.5 h-3.5" />
+                                        </label>
+                                      ) : (
+                                        <div className="flex items-center gap-1">
+                                          <button onClick={() => {
+                                            if (staff.cvDataUrl) {
+                                              setCvPreview({ name: staff.cv, dataUrl: staff.cvDataUrl });
+                                            } else {
+                                              alert(`File attached: ${staff.cv}\n(Document content is not available)`);
+                                            }
+                                          }} className="p-2 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl hover:bg-emerald-100 transition-all shadow-sm" title={`View CV (${staff.cv})`}>
+                                            <FileText className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button onClick={() => {
+                                            if (confirm("Remove this CV?")) {
+                                              updateStaff({ ...staff, cv: '', cvDataUrl: '' });
+                                            }
+                                          }} className="p-2 bg-red-50 text-red-600 border border-red-100 rounded-xl hover:bg-red-100 transition-all shadow-sm opacity-0 group-hover/staff:opacity-100" title="Remove CV">
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      )}
+                                    </>
+                                  )}
                                   
-                                  {!staff.cv ? (
-                                    <label className="cursor-pointer p-2 bg-slate-50 border border-slate-200 text-slate-400 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 transition-all opacity-0 group-hover/staff:opacity-100" title="Upload CV">
-                                      <input type="file" className="hidden" accept=".pdf,.doc,.docx,image/*" onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) {
-                                          if (file.size > 2 * 1024 * 1024) {
-                                            alert('File is too large. Please upload a file smaller than 2MB.');
-                                            return;
-                                          }
-                                          const reader = new FileReader();
-                                          reader.onloadend = () => {
-                                            const updated = { ...staff, cv: file.name, cvDataUrl: reader.result as string };
-                                            updateStaff(updated);
-                                          };
-                                          reader.readAsDataURL(file);
-                                        }
-                                        e.target.value = '';
-                                      }} />
-                                      <Plus className="w-3.5 h-3.5" />
-                                    </label>
-                                  ) : (
-                                    <div className="flex items-center gap-1">
-                                      <button onClick={() => {
-                                        if (staff.cvDataUrl) {
-                                          setCvPreview({ name: staff.cv, dataUrl: staff.cvDataUrl });
-                                        } else {
-                                          alert(`File attached: ${staff.cv}\n(Document content is not available)`);
-                                        }
-                                      }} className="p-2 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl hover:bg-emerald-100 transition-all shadow-sm" title={`View CV (${staff.cv})`}>
-                                        <FileText className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button onClick={() => {
-                                        if (confirm("Remove this CV?")) {
-                                          updateStaff({ ...staff, cv: '', cvDataUrl: '' });
-                                        }
-                                      }} className="p-2 bg-red-50 text-red-600 border border-red-100 rounded-xl hover:bg-red-100 transition-all shadow-sm opacity-0 group-hover/staff:opacity-100" title="Remove CV">
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
+                                  {role === 'viewer' && staff.cv && (
+                                    <button onClick={() => {
+                                      if (staff.cvDataUrl) {
+                                        setCvPreview({ name: staff.cv, dataUrl: staff.cvDataUrl });
+                                      } else {
+                                        alert(`File attached: ${staff.cv}\n(Document content is not available)`);
+                                      }
+                                    }} className="p-2 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl hover:bg-emerald-100 transition-all shadow-sm" title={`View CV (${staff.cv})`}>
+                                      <FileText className="w-3.5 h-3.5" />
+                                    </button>
                                   )}
                                 </div>
                               </div>
@@ -479,9 +499,11 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
           >
             <Filter className="w-4 h-4" /> {showNoParentOnly ? 'ပင်မဌာနများသာ' : 'ပင်မဌာနများသာ ပြမည်'}
           </button>
-          <button onClick={() => { handleFacTypeChange(fType); setIsAddOpen(true); }} className="bg-emerald-600 text-white px-6 py-3 rounded-xl text-[13px] font-bold hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 active:scale-95 shrink-0">
-            <Plus className="w-4 h-4" /> ဌာနအသစ် ထည့်သွင်းရန်
-          </button>
+          {role !== 'viewer' && (
+            <button onClick={() => { handleFacTypeChange(fType); setIsAddOpen(true); }} className="bg-emerald-600 text-white px-6 py-3 rounded-xl text-[13px] font-bold hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 active:scale-95 shrink-0">
+              <Plus className="w-4 h-4" /> ဌာနအသစ် ထည့်သွင်းရန်
+            </button>
+          )}
         </div>
       </div>
 

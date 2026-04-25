@@ -14,38 +14,19 @@ import StaffList from './components/StaffList';
 import Settings from './components/Settings';
 import { auth } from './firebase';
 import { GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { useRole } from './contexts/RoleContext';
+import Login from './components/Login';
 
 export default function App() {
   const state = useAppState();
+  const { role } = useRole();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'facilities' | 'staff' | 'settings'>('facilities');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
 
   if (!state.user && state.isLoaded) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
-        <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm flex flex-col items-center">
-          <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-500 mb-6">
-            <LogIn className="w-8 h-8" />
-          </div>
-          <h1 className="text-2xl font-black text-slate-800 mb-2">Welcome Back</h1>
-          <p className="text-sm font-medium text-slate-500 mb-8 text-center">Sign in to manage healthcare staffing and quotas.</p>
-          <button 
-            onClick={async () => {
-              const provider = new GoogleAuthProvider();
-              try {
-                await signInWithPopup(auth, provider);
-              } catch (err) {
-                console.error(err);
-              }
-            }}
-            className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all flex justify-center"
-          >
-            Sign in with Google
-          </button>
-        </div>
-      </div>
-    );
+    return <Login />;
   }
 
   if (!state.isLoaded) {
@@ -152,8 +133,12 @@ export default function App() {
           <NavButton id="staff" icon={Users} label={translations[state.language].staffDirectory} />
           
           <div className="pt-6 mt-6 border-t border-slate-100">
-            {isSidebarExpanded && <p className="text-[10px] uppercase font-bold tracking-widest text-slate-400 mb-4 ml-4">{translations[state.language].system}</p>}
-            <NavButton id="settings" icon={SettingsIcon} label={translations[state.language].settings} />
+            {role === 'admin' && (
+              <>
+                {isSidebarExpanded && <p className="text-[10px] uppercase font-bold tracking-widest text-slate-400 mb-4 ml-4">{translations[state.language].system}</p>}
+                <NavButton id="settings" icon={SettingsIcon} label={translations[state.language].settings} />
+              </>
+            )}
           </div>
         </nav>
 
@@ -213,7 +198,14 @@ export default function App() {
               {activeTab === 'dashboard' && <Dashboard state={state} />}
               {activeTab === 'facilities' && <Facilities state={state} />}
               {activeTab === 'staff' && <StaffList state={state} />}
-              {activeTab === 'settings' && <Settings state={state} />}
+              {activeTab === 'settings' && (
+                <ProtectedRoute 
+                  allowedRoles={['admin']} 
+                  onAccessDenied={() => setActiveTab('dashboard')}
+                >
+                  <Settings state={state} />
+                </ProtectedRoute>
+              )}
             </motion.div>
           </AnimatePresence>
         </div>
