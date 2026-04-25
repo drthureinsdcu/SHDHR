@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Phase 0: Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Common Helpers
+    function isSignedIn() { return request.auth != null; }
+
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /facilities/{facilityId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /staff/{staffId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /quotas/{quotaId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+  }
+}

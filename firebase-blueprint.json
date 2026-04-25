@@ -1,0 +1,79 @@
+{
+  "entities": {
+    "Facility": {
+      "title": "Facility",
+      "description": "A healthcare facility",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "state": { "type": "string" },
+        "district": { "type": "string" },
+        "township": { "type": "string" },
+        "customQuotas": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "parentFacilityId": { "type": "number", "nullable": true },
+        "status": { "type": "string" },
+        "infrastructureStatus": { "type": "string" }
+      }
+    },
+    "Staff": {
+      "title": "Staff",
+      "description": "A healthcare staff member",
+      "type": "object",
+      "properties": {
+        "facilityId": { "type": "number" },
+        "currentFacilityId": { "type": "number" },
+        "externalFacilityName": { "type": "string" },
+        "position": { "type": "string" },
+        "reason": { "type": "string" },
+        "cv": { "type": "string" },
+        "cvDataUrl": { "type": "string" },
+        "dutyStatus": { "type": "string" },
+        "activeStatus": { "type": "string" },
+        "activeReason": { "type": "string" }
+      }
+    },
+    "Quota": {
+      "title": "Quota",
+      "description": "Global Quota",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "position": { "type": "string" },
+        "max": { "type": "number" }
+      }
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Global Settings",
+      "type": "object",
+      "properties": {
+         "facilityTypes": { "type": "array", "items": { "type": "string" } },
+         "positionsList": { "type": "array", "items": { "type": "string" } },
+         "locations": { "type": "array", "items": { "type": "object" } },
+         "subdepartmentsMap": { "type": "object" }
+      }
+    }
+  },
+  "firestore": {
+    "facilities/{facilityId}": {
+      "schema": { "$ref": "#/entities/Facility" },
+      "description": "List of facilities"
+    },
+    "staff/{staffId}": {
+      "schema": { "$ref": "#/entities/Staff" },
+      "description": "List of staff"
+    },
+    "quotas/{quotaId}": {
+      "schema": { "$ref": "#/entities/Quota" },
+      "description": "List of global quotas"
+    },
+    "settings/{settingId}": {
+      "schema": { "$ref": "#/entities/Settings" },
+      "description": "Global settings like facilityTypes, positionsList, locations"
+    }
+  }
+}

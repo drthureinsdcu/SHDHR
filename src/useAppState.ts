@@ -1,10 +1,46 @@
 import { useState, useEffect, Dispatch, SetStateAction } from 'react';
 import { AppState, Facility, Quota, Staff, RegionData } from './types';
+import { auth, db } from './firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 
 const defaultFacilityTypes = ["Central", "District", "Hospital", "RHC", "Sub-RHC"];
 const defaultPositionsList = ["Medical Officer", "Health Assistant", "Midwife"];
 
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: any;
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
 export function useAppState() {
+  const [user, setUser] = useState<User | null>(null);
+  const [language, setLanguageState] = useState<'en' | 'my'>('en');
   const [facilityTypes, setFacilityTypes] = useState<string[]>([]);
   const [positionsList, setPositionsList] = useState<string[]>([]);
   const [globalDefaultQuotas, setGlobalDefaultQuotas] = useState<Quota[]>([]);
@@ -12,69 +48,85 @@ export function useAppState() {
   const [staffEntries, setStaffEntries] = useState<Staff[]>([]);
   const [locations, setLocations] = useState<RegionData[]>([]);
 
+  const [subdepartmentsMap, setSubdepartmentsMap] = useState<Record<string, string[]>>({});
+
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    // Load from local storage
-    const loadStr = (key: string) => localStorage.getItem(key);
-    const loadObj = (key: string, defVal: any) => {
-      const stored = loadStr(key);
-      if (stored) {
-        try { return JSON.parse(stored); } catch (e) { return defVal; }
+    const unsubAuth = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (!currentUser) {
+        setIsLoaded(true);
       }
-      return defVal;
-    };
-
-    setFacilityTypes(loadObj('hr_fac_types', defaultFacilityTypes));
-    setPositionsList(loadObj('hr_positions_list', defaultPositionsList));
-    setGlobalDefaultQuotas(loadObj('hr_quotas', []));
-    setFacilities(loadObj('hr_facilities', []));
-    setLocations(loadObj('hr_locations', []));
-    
-    // Migrate staff to include standard dutyStatus and activeStatus
-    let rawStaff = loadObj('hr_staff', []);
-    let migrated = false;
-    const migratedStaff = rawStaff.map((s: any) => {
-      let updated = { ...s };
-      if (!updated.currentFacilityId || !updated.dutyStatus) {
-        migrated = true;
-        updated.currentFacilityId = s.facilityId;
-        updated.dutyStatus = 'Present';
-      }
-      if (!updated.activeStatus) {
-        migrated = true;
-        updated.activeStatus = 'Active';
-      }
-      return updated;
     });
-
-    setStaffEntries(migratedStaff);
-    if (migrated) {
-      localStorage.setItem('hr_staff', JSON.stringify(migratedStaff));
-    }
-
-    setIsLoaded(true);
+    return () => unsubAuth();
   }, []);
 
-  const updateState = (key: string, value: any, setter: Dispatch<SetStateAction<any>>) => {
-    setter(value);
-    localStorage.setItem(key, JSON.stringify(value));
+  useEffect(() => {
+    if (!user) return;
+
+    // Load static UI state from local storage
+    const loadStr = (key: string) => localStorage.getItem(key);
+    const loadedLang = loadStr('hr_lang') as 'en' | 'my';
+    if (loadedLang) setLanguageState(loadedLang);
+
+    // Setup Firestore listeners
+    const unsubFacilities = onSnapshot(collection(db, 'facilities'), (snap) => {
+      setFacilities(snap.docs.map(d => ({ ...d.data(), id: Number(d.id) } as Facility)));
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'facilities'));
+
+    const unsubStaff = onSnapshot(collection(db, 'staff'), (snap) => {
+      setStaffEntries(snap.docs.map(d => ({ ...d.data(), id: Number(d.id) } as Staff)));
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'staff'));
+
+    const unsubQuotas = onSnapshot(collection(db, 'quotas'), (snap) => {
+      setGlobalDefaultQuotas(snap.docs.map(d => ({ ...d.data(), id: Number(d.id) } as Quota)));
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'quotas'));
+
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.facilityTypes) setFacilityTypes(data.facilityTypes);
+        if (data.positionsList) setPositionsList(data.positionsList);
+        if (data.locations) setLocations(data.locations);
+        if (data.subdepartmentsMap) setSubdepartmentsMap(data.subdepartmentsMap);
+      } else {
+        setFacilityTypes(defaultFacilityTypes);
+        setPositionsList(defaultPositionsList);
+      }
+      setIsLoaded(true);
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'settings/general'));
+
+    return () => {
+      unsubFacilities();
+      unsubStaff();
+      unsubQuotas();
+      unsubSettings();
+    };
+  }, [user]);
+
+  const updateSettingsItem = async (updates: any) => {
+    try {
+      await setDoc(doc(db, 'settings', 'general'), updates, { merge: true });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, 'settings/general');
+    }
   };
 
   const addFacilityType = (type: string) => {
     if (!facilityTypes.includes(type)) {
-      updateState('hr_fac_types', [...facilityTypes, type], setFacilityTypes);
+      updateSettingsItem({ facilityTypes: [...facilityTypes, type] });
     }
   };
 
   const deleteFacilityType = (idx: number) => {
     const newTypes = facilityTypes.filter((_, i) => i !== idx);
-    updateState('hr_fac_types', newTypes, setFacilityTypes);
+    updateSettingsItem({ facilityTypes: newTypes });
   };
 
-  const addQuota = (newQuota: Quota & { isNewPosition?: boolean; newPosName?: string }) => {
+  const addQuota = async (newQuota: Quota & { isNewPosition?: boolean; newPosName?: string }) => {
     if (newQuota.isNewPosition && newQuota.newPosName && !positionsList.includes(newQuota.newPosName)) {
-      updateState('hr_positions_list', [...positionsList, newQuota.newPosName], setPositionsList);
+      await updateSettingsItem({ positionsList: [...positionsList, newQuota.newPosName] });
     }
     const finalQuota = {
       id: newQuota.id,
@@ -82,51 +134,80 @@ export function useAppState() {
       position: newQuota.position,
       max: newQuota.max
     };
-    updateState('hr_quotas', [...globalDefaultQuotas, finalQuota], setGlobalDefaultQuotas);
+    try {
+      await setDoc(doc(db, 'quotas', String(finalQuota.id)), finalQuota);
+    } catch (e) { handleFirestoreError(e, OperationType.WRITE, 'quotas'); }
   };
 
-  const deleteQuota = (id: number) => {
-    updateState('hr_quotas', globalDefaultQuotas.filter(q => q.id !== id), setGlobalDefaultQuotas);
+  const deleteQuota = async (id: number) => {
+    try {
+      await deleteDoc(doc(db, 'quotas', String(id)));
+    } catch (e) { handleFirestoreError(e, OperationType.DELETE, 'quotas'); }
   };
 
-  const addFacility = (fac: Facility) => {
-    updateState('hr_facilities', [...facilities, fac], setFacilities);
+  const addFacility = async (fac: Facility) => {
+    try {
+      await setDoc(doc(db, 'facilities', String(fac.id)), fac);
+    } catch (e) { handleFirestoreError(e, OperationType.WRITE, 'facilities'); }
   };
 
-  const updateFacility = (updatedFac: Facility) => {
-    updateState('hr_facilities', facilities.map(f => f.id === updatedFac.id ? updatedFac : f), setFacilities);
+  const updateFacility = async (updatedFac: Facility) => {
+    try {
+      await setDoc(doc(db, 'facilities', String(updatedFac.id)), updatedFac);
+    } catch (e) { handleFirestoreError(e, OperationType.WRITE, 'facilities'); }
   };
 
-  const deleteFacility = (id: number) => {
-    updateState('hr_facilities', facilities.filter(f => f.id !== id), setFacilities);
-    // Also delete associated staff
-    const newStaff = staffEntries.filter(s => s.facilityId !== id && s.currentFacilityId !== id);
-    updateState('hr_staff', newStaff, setStaffEntries);
+  const deleteFacility = async (id: number) => {
+    try {
+      await deleteDoc(doc(db, 'facilities', String(id)));
+      const staffToDelete = staffEntries.filter(s => s.facilityId === id || s.currentFacilityId === id);
+      for (const s of staffToDelete) {
+        await deleteDoc(doc(db, 'staff', String(s.id)));
+      }
+    } catch (e) { handleFirestoreError(e, OperationType.DELETE, 'facilities'); }
   };
 
-  const addStaff = (staff: Staff) => {
-    updateState('hr_staff', [...staffEntries, staff], setStaffEntries);
+  const addStaff = async (staff: Staff) => {
+    try {
+      await setDoc(doc(db, 'staff', String(staff.id)), staff);
+    } catch (e) { handleFirestoreError(e, OperationType.WRITE, 'staff'); }
   };
 
-  const deleteStaff = (id: number) => {
-    updateState('hr_staff', staffEntries.filter(s => s.id !== id), setStaffEntries);
+  const deleteStaff = async (id: number) => {
+    try {
+      await deleteDoc(doc(db, 'staff', String(id)));
+    } catch (e) { handleFirestoreError(e, OperationType.DELETE, 'staff'); }
   };
 
-  const updateStaff = (updatedStaff: Staff) => {
-    updateState('hr_staff', staffEntries.map(s => s.id === updatedStaff.id ? updatedStaff : s), setStaffEntries);
+  const updateStaff = async (updatedStaff: Staff) => {
+    try {
+      await setDoc(doc(db, 'staff', String(updatedStaff.id)), updatedStaff);
+    } catch (e) { handleFirestoreError(e, OperationType.WRITE, 'staff'); }
   };
 
   const updateLocations = (newLocs: RegionData[]) => {
-    updateState('hr_locations', newLocs, setLocations);
+    updateSettingsItem({ locations: newLocs });
+  };
+
+  const updateSubdepartmentsMap = (newMap: Record<string, string[]>) => {
+    updateSettingsItem({ subdepartmentsMap: newMap });
+  };
+
+  const setLanguage = (lang: 'en' | 'my') => {
+    setLanguageState(lang);
+    localStorage.setItem('hr_lang', lang);
   };
 
   return {
     isLoaded,
+    user,
+    language, setLanguage,
     facilityTypes, addFacilityType, deleteFacilityType,
     positionsList,
     globalDefaultQuotas, addQuota, deleteQuota,
     facilities, addFacility, updateFacility, deleteFacility,
     staffEntries, addStaff, updateStaff, deleteStaff,
     locations, updateLocations,
+    subdepartmentsMap, updateSubdepartmentsMap,
   };
 }

@@ -19,6 +19,8 @@ export interface Facility {
   township: string;
   customQuotas: CustomQuota[];
   parentFacilityId?: number;
+  status?: 'Functioning' | 'Non-Functioning';
+  infrastructureStatus?: 'Standard' | 'Sub-standard';
 }
 
 export interface Staff {
@@ -28,7 +30,8 @@ export interface Staff {
   externalFacilityName?: string;
   position: string;
   reason: string; // Attachment reason (not needed for main)
-  cv: string;
+  cv: string; // Will keep this for backward compatibility (maybe filename)
+  cvDataUrl?: string; // Base64 data of the file
   dutyStatus: 'Present' | 'Attached';
   activeStatus?: 'Active' | 'Leave' | 'Other';
   activeReason?: string;

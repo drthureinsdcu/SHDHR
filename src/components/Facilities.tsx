@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, MapPin, SlidersHorizontal, UserPlus, AlertCircle, Edit2 } from 'lucide-react';
+import { Plus, Trash2, MapPin, SlidersHorizontal, UserPlus, AlertCircle, Edit2, Search, Building, MoreVertical, FileText, ChevronRight, Info, Filter, Download } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Facility, CustomQuota } from '../types';
+import FacilitySelect from './FacilitySelect';
 
 export default function Facilities({ state }: { state: ReturnType<typeof import('../useAppState').useAppState> }) {
   const { facilities, facilityTypes, globalDefaultQuotas, addFacility, updateFacility, deleteFacility, staffEntries, positionsList, addStaff, updateStaff } = state;
@@ -9,6 +11,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
   const [isEditFacOpen, setIsEditFacOpen] = useState(false);
   const [activeRecruit, setActiveRecruit] = useState<{facId: number, pos: string} | null>(null);
   const [activeFacility, setActiveFacility] = useState<Facility | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   // Facility Form State
   const [fName, setFName] = useState('');
@@ -16,8 +19,13 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
   const [fState, setFState] = useState('');
   const [fDistrict, setFDistrict] = useState('');
   const [fTownship, setFTownship] = useState('');
-  const [fParent, setFParent] = useState('');
+  const [fParent, setFParent] = useState<number | undefined>(undefined);
   const [fQuotas, setFQuotas] = useState<Record<string, number>>({});
+  const [fStatus, setFStatus] = useState<'Functioning'|'Non-Functioning'>('Functioning');
+  const [fInfraStatus, setFInfraStatus] = useState<'Standard'|'Sub-standard'>('Standard');
+
+  // File Preview Modal
+  const [cvPreview, setCvPreview] = useState<{ name: string, dataUrl: string } | null>(null);
 
   // Delete confirm state
   const [deleteConfirm, setDeleteConfirm] = useState<{ step: 1 | 2, message: string, action: () => void } | null>(null);
@@ -38,7 +46,8 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
   const [rEditingStaffId, setREditingStaffId] = useState<number | null>(null);
 
   const resetFacilityForm = () => {
-    setFName(''); setFType(facilityTypes[0] || ''); setFState(''); setFDistrict(''); setFTownship(''); setFParent(''); setFQuotas({});
+    setFName(''); setFType(facilityTypes[0] || ''); setFState(''); setFDistrict(''); setFTownship(''); setFParent(undefined); setFQuotas({});
+    setFStatus('Functioning'); setFInfraStatus('Standard');
     setIsAddOpen(false);
   }
 
@@ -53,9 +62,11 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
   const submitAddFacility = () => {
     if (!fName.trim()) return alert('ဌာနအမည် ထည့်သွင်းရန် လိုအပ်ပါသည်။');
     const customQuotas: CustomQuota[] = Object.keys(fQuotas).map(k => ({ position: k, max: fQuotas[k] }));
-    const parentFacilityId = fParent ? parseInt(fParent) : undefined;
+    const parentFacilityId = fParent;
     addFacility({
-      id: Date.now(), name: fName.trim(), type: fType, state: fState, district: fDistrict, township: fTownship, customQuotas, parentFacilityId
+      id: Date.now(), name: fName.trim(), type: fType, state: fState, district: fDistrict, township: fTownship, 
+      customQuotas, parentFacilityId,
+      status: fStatus, infrastructureStatus: fInfraStatus
     });
     resetFacilityForm();
   }
@@ -137,175 +148,391 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
   const occupiedCountForRecruit = activeRecruit ? staffEntries.filter(s => s.facilityId === activeRecruit.facId && s.position === activeRecruit.pos).length : 0;
   const isOverQuota = activeQuotaDef && activeQuotaDef.max > 0 && occupiedCountForRecruit >= activeQuotaDef.max;
 
+  const rootFacilitiesToShow = React.useMemo(() => {
+    return facilities.filter(f => {
+      const isChild = f.parentFacilityId && f.parentFacilityId !== f.id && facilities.some(p => p.id === f.parentFacilityId);
+
+      if (!searchTerm) {
+        // Normal view: only show root facilities or those with invalid parents
+        return !isChild;
+      }
+      
+      // Search view: check if this facility matches
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch = (fac: Facility) => {
+        const fullLoc = [fac.state, fac.district, fac.township].filter(Boolean).join(' ').toLowerCase();
+        return fac.name.toLowerCase().includes(searchLower) ||
+          fac.type.toLowerCase().includes(searchLower) ||
+          fullLoc.includes(searchLower);
+      };
+      
+      if (matchesSearch(f)) return true;
+      
+      // If it's a parent, also show it if any of its children match
+      const children = facilities.filter(child => child.parentFacilityId === f.id);
+      return children.some(matchesSearch);
+    });
+  }, [facilities, searchTerm]);
+
+  const locationGroups = React.useMemo(() => {
+    const groups: Record<string, Facility[]> = {};
+    rootFacilitiesToShow.forEach(f => {
+      const loc = [f.state, f.district, f.township].filter(Boolean).join(' • ') || 'Unspecified Location';
+      if (!groups[loc]) groups[loc] = [];
+      groups[loc].push(f);
+    });
+    return groups;
+  }, [rootFacilitiesToShow]);
+
+  const [expandedLocations, setExpandedLocations] = useState<Record<string, boolean>>({});
+  const [expandedParents, setExpandedParents] = useState<Record<number, boolean>>({});
+  const [expandedSubDepts, setExpandedSubDepts] = useState<Record<number, boolean>>({});
+  const [expandedCards, setExpandedCards] = useState<Record<number, boolean>>({});
+  const [showNoParentOnly, setShowNoParentOnly] = useState(false);
+
+  const toggleLocation = (loc: string) => {
+    setExpandedLocations(prev => ({ ...prev, [loc]: !prev[loc] }));
+  };
+
+  const toggleParent = (id: number) => {
+    setExpandedParents(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const toggleSubDepts = (id: number) => {
+    setExpandedSubDepts(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const toggleCard = (id: number) => {
+    setExpandedCards(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const renderFacilityCard = (f: Facility, depth = 0) => {
+    const allChildren = facilities.filter(child => child.parentFacilityId === f.id);
+    const subDeptTypes = state.subdepartmentsMap[f.type] || [];
+    const subDepartments = allChildren.filter(c => subDeptTypes.includes(c.type));
+    const childFacilities = allChildren.filter(c => !subDeptTypes.includes(c.type));
+
+    const locationStr = [f.state, f.district, f.township].filter(Boolean).join(' • ');
+    const parentName = f.parentFacilityId ? facilities.find(p => p.id === f.parentFacilityId)?.name : null;
+    const isExpandedFacilities = expandedParents[f.id];
+    const isSubDeptsExpanded = expandedSubDepts[f.id];
+    const isChild = depth > 0;
+    const isCardExpanded = expandedCards[f.id] === true;
+
+    return (
+      <motion.div 
+        layout
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        key={f.id} 
+        className={`bg-white rounded-3xl shadow-sm border ${isChild ? 'border-emerald-200 border-l-4' : 'border-slate-200'} flex flex-col h-full hover:shadow-xl hover:shadow-slate-200/40 transition-all duration-300 overflow-hidden group ml-${depth > 1 ? 4 : 0}`}
+      >
+        <div className="p-7">
+          <div className="flex justify-between items-start mb-6">
+            <div className="flex-1">
+              <div className="flex gap-2 items-center flex-wrap mb-3">
+                <span className="text-[10px] font-black bg-emerald-50 text-emerald-600 px-2.5 py-1 rounded-lg uppercase tracking-wider border border-emerald-100/50">{f.type}</span>
+                {parentName && <span className="text-[10px] font-black bg-slate-50 text-slate-500 px-2.5 py-1 rounded-lg border border-slate-200/60 uppercase tracking-wider">Parent: {parentName}</span>}
+                {f.status === 'Non-Functioning' && <span className="text-[10px] font-black bg-red-50 text-red-600 px-2.5 py-1 rounded-lg uppercase tracking-wider border border-red-100/50">Non-Functioning</span>}
+                {f.infrastructureStatus === 'Sub-standard' && <span className="text-[10px] font-black bg-orange-50 text-orange-600 px-2.5 py-1 rounded-lg uppercase tracking-wider border border-orange-100/50">Sub-standard</span>}
+              </div>
+              <h4 className="text-2xl font-black text-slate-900 font-display leading-tight">{f.name}</h4>
+              {locationStr && <p className="text-xs text-slate-500 font-bold mt-2 flex items-center gap-1.5 uppercase tracking-wide"><MapPin className="w-4 h-4 text-emerald-500" /> {locationStr}</p>}
+            </div>
+            <div className="flex flex-col items-end gap-2 shrink-0">
+              <button 
+                onClick={() => toggleCard(f.id)} 
+                className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+              >
+                <ChevronRight className={`w-5 h-5 transition-transform ${isCardExpanded ? 'rotate-90' : ''}`} />
+              </button>
+              <button onClick={() => openEditFacility(f)} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all opacity-0 group-hover:opacity-100">
+                <MoreVertical className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <AnimatePresence>
+            {isCardExpanded && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="grid grid-cols-1 gap-4 mt-2">
+                  {f.customQuotas.length === 0 && (
+                    <div className="py-4 px-6 bg-slate-50 rounded-2xl border border-dotted border-slate-300 text-center">
+                       <p className="text-[12px] text-slate-400 font-bold">သတ်မှတ်ချက်များ မရှိသေးပါ</p>
+                    </div>
+                  )}
+            {f.customQuotas.map(q => {
+              const allowed = q.max || 0;
+              const homeStaff = staffEntries.filter(s => s.facilityId === f.id && s.position === q.position);
+              const occupied = homeStaff.length;
+              const attachedOut = homeStaff.filter(s => s.currentFacilityId !== f.id).length;
+              const attachedIn = staffEntries.filter(s => s.currentFacilityId === f.id && s.facilityId !== f.id && s.position === q.position).length;
+              const vacancy = Math.max(0, allowed - occupied);
+              const isOver = allowed > 0 && occupied > allowed;
+
+              return (
+                <div key={q.position} className={`flex flex-col p-5 rounded-2xl border-2 transition-all duration-200 ${isOver ? 'bg-red-50/40 border-red-100 shadow-red-50' : 'bg-slate-50/50 border-slate-100 hover:border-emerald-100'}`}>
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-base font-black text-slate-800 font-display">{q.position}</span>
+                    <button onClick={() => openRecruit(f.id, q.position)} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl shadow-sm text-xs font-bold hover:border-emerald-500 hover:text-emerald-600 transition-all active:scale-95 flex items-center gap-1.5 leading-none">
+                      <Plus className="w-4 h-4" /> Recruit
+                    </button>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-white/60 p-3 rounded-xl border border-slate-200/40">
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 leading-none">Occupied</p>
+                      <div className="flex items-baseline gap-1">
+                        <span className={`text-lg font-mono font-bold ${isOver ? 'text-red-600' : 'text-slate-900'}`}>{occupied}</span>
+                        <span className="text-xs font-bold text-slate-400">/ {allowed}</span>
+                      </div>
+                    </div>
+                    <div className="bg-white/60 p-3 rounded-xl border border-slate-200/40">
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 leading-none">Vacancy</p>
+                      <span className={`text-lg font-mono font-bold ${vacancy > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>{vacancy}</span>
+                    </div>
+                    <div className="bg-white/60 p-3 rounded-xl border border-slate-200/40">
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 leading-none">Out</p>
+                      <span className={`text-lg font-mono font-bold ${attachedOut > 0 ? 'text-amber-500' : 'text-slate-400'}`}>{attachedOut}</span>
+                    </div>
+                    <div className="bg-white/60 p-3 rounded-xl border border-slate-200/40">
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 leading-none">In</p>
+                      <span className={`text-lg font-mono font-bold ${attachedIn > 0 ? 'text-purple-600' : 'text-slate-400'}`}>{attachedIn}</span>
+                    </div>
+                  </div>
+
+                  {/* Occupied Staff CV Dropdown */}
+                  {(() => {
+                    const occupantList = staffEntries.filter(s => s.currentFacilityId === f.id && s.position === q.position);
+                    if (occupantList.length === 0) return null;
+                    return (
+                      <details className="mt-5 group/acc bg-white/40 border border-slate-200/60 rounded-2xl overflow-hidden">
+                        <summary className="px-5 py-3 text-xs font-black text-slate-600 cursor-pointer flex justify-between items-center outline-none list-none transition hover:bg-slate-100/50 uppercase tracking-widest">
+                          <span>Staff Details ({occupantList.length})</span>
+                          <span className="text-slate-400 group-open/acc:rotate-180 transition-transform text-xs">▼</span>
+                        </summary>
+                        <div className="p-4 flex flex-col gap-3 border-t border-slate-100">
+                          {occupantList.map((staff, sIdx) => {
+                            const isAttachedIn = staff.facilityId !== f.id;
+                            return (
+                              <div key={staff.id} className="flex justify-between p-3 rounded-xl bg-white border border-slate-100 shadow-sm gap-3 items-center group/staff transition-all hover:border-emerald-100">
+                                <div className="flex flex-col gap-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-1 mt-0.5">
+                                     <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center text-xs font-black text-slate-500 shadow-sm">{sIdx + 1}</div>
+                                     <div className="flex flex-col">
+                                       <span className="text-sm font-bold text-slate-800 truncate">
+                                        {isAttachedIn ? 'Attached In' : 'Permanent'}
+                                       </span>
+                                       <span className={`text-[10px] font-black w-fit px-1.5 py-0.5 rounded uppercase tracking-widest mt-0.5 ${staff.activeStatus === 'Leave' ? 'bg-amber-100 text-amber-700' : staff.activeStatus === 'Other' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                         {staff.activeStatus || 'Active'}
+                                       </span>
+                                     </div>
+                                  </div>
+                                  {isAttachedIn && staff.reason && (
+                                    <p className="text-xs text-slate-500 font-medium ml-10 flex items-center gap-1 mt-1 break-words pb-1"><span className="text-purple-600 font-black shrink-0">REP:</span> {staff.reason}</p>
+                                  )}
+                                </div>
+                                
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <button onClick={() => {
+                                    openRecruit(f.id, q.position);
+                                    setREditingStaffId(staff.id);
+                                    setRIsExternal(staff.facilityId === -1);
+                                    if (staff.facilityId !== -1 && staff.facilityId !== f.id) {
+                                      setRSourceFac(staff.facilityId.toString());
+                                    }
+                                    if (staff.facilityId === -1) {
+                                      setRExtName(staff.externalFacilityName || '');
+                                    }
+                                    setRDuty(staff.dutyStatus === 'Attached' ? 'attach' : 'main');
+                                    setRReason(staff.reason || '');
+                                    setRActiveStatus(staff.activeStatus || 'Active');
+                                    setRActiveReason(staff.activeReason || '');
+                                  }} className="p-2 bg-slate-50 text-slate-400 border border-slate-200 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 transition-all opacity-0 group-hover/staff:opacity-100" title="Edit">
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  
+                                  {!staff.cv ? (
+                                    <label className="cursor-pointer p-2 bg-slate-50 border border-slate-200 text-slate-400 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 transition-all opacity-0 group-hover/staff:opacity-100" title="Upload CV">
+                                      <input type="file" className="hidden" accept=".pdf,.doc,.docx,image/*" onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) {
+                                          if (file.size > 2 * 1024 * 1024) {
+                                            alert('File is too large. Please upload a file smaller than 2MB.');
+                                            return;
+                                          }
+                                          const reader = new FileReader();
+                                          reader.onloadend = () => {
+                                            const updated = { ...staff, cv: file.name, cvDataUrl: reader.result as string };
+                                            updateStaff(updated);
+                                          };
+                                          reader.readAsDataURL(file);
+                                        }
+                                        e.target.value = '';
+                                      }} />
+                                      <Plus className="w-3.5 h-3.5" />
+                                    </label>
+                                  ) : (
+                                    <div className="flex items-center gap-1">
+                                      <button onClick={() => {
+                                        if (staff.cvDataUrl) {
+                                          setCvPreview({ name: staff.cv, dataUrl: staff.cvDataUrl });
+                                        } else {
+                                          alert(`File attached: ${staff.cv}\n(Document content is not available)`);
+                                        }
+                                      }} className="p-2 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl hover:bg-emerald-100 transition-all shadow-sm" title={`View CV (${staff.cv})`}>
+                                        <FileText className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button onClick={() => {
+                                        if (confirm("Remove this CV?")) {
+                                          updateStaff({ ...staff, cv: '', cvDataUrl: '' });
+                                        }
+                                      }} className="p-2 bg-red-50 text-red-600 border border-red-100 rounded-xl hover:bg-red-100 transition-all shadow-sm opacity-0 group-hover/staff:opacity-100" title="Remove CV">
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </details>
+                    );
+                  })()}
+                </div>
+              );
+            })}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+        {subDepartments.length > 0 && !showNoParentOnly && (
+          <div className="border-t border-slate-100 p-4 bg-slate-50 flex flex-col">
+            <button onClick={() => toggleSubDepts(f.id)} className="text-sm font-bold text-blue-600 w-full text-center py-2 hover:bg-blue-50 rounded-xl transition-colors flex items-center justify-center gap-2">
+               {isSubDeptsExpanded ? 'Sub-departments ဖျောက်မည်' : 'Sub-departments ပြမည်'} 
+               <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-lg text-xs">{subDepartments.length}</span>
+               <ChevronRight className={`w-4 h-4 transition-transform ${isSubDeptsExpanded ? 'rotate-90' : ''}`} />
+            </button>
+            {isSubDeptsExpanded && (
+              <AnimatePresence>
+                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                    <div className="flex flex-col gap-6 mt-4 p-2">
+                       {subDepartments.map(child => renderFacilityCard(child, depth + 1))}
+                    </div>
+                 </motion.div>
+              </AnimatePresence>
+            )}
+          </div>
+        )}
+
+        {childFacilities.length > 0 && !showNoParentOnly && (
+          <div className="border-t border-slate-100 p-4 bg-slate-50 flex flex-col">
+            <button onClick={() => toggleParent(f.id)} className="text-sm font-bold text-emerald-600 w-full text-center py-2 hover:bg-emerald-50 rounded-xl transition-colors flex items-center justify-center gap-2">
+               {isExpandedFacilities ? 'လက်အောက်ခံ ဌာနများ ဖျောက်မည်' : 'လက်အောက်ခံ ဌာနများ ပြမည်'} 
+               <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-lg text-xs">{childFacilities.length}</span>
+               <ChevronRight className={`w-4 h-4 transition-transform ${isExpandedFacilities ? 'rotate-90' : ''}`} />
+            </button>
+            {isExpandedFacilities && (
+              <AnimatePresence>
+                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                    <div className="flex flex-col gap-6 mt-4 p-2">
+                       {childFacilities.map(child => renderFacilityCard(child, depth + 1))}
+                    </div>
+                 </motion.div>
+              </AnimatePresence>
+            )}
+          </div>
+        )}
+      </motion.div>
+    );
+  };
+
   return (
-    <div className="space-y-8 relative">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">ဌာနနှင့် ဝန်ထမ်းခန့်ထားမှုများ</h2>
-          <p className="text-slate-500 text-sm mt-1">ဌာနများ၏ လစ်လပ်ရာထူးများတွင် တိုက်ရိုက် ဝန်ထမ်းခန့်အပ်နိုင်ပါသည်</p>
+    <div className="space-y-10 relative">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-end gap-6 mb-2">
+        <div className="max-w-xl">
+          <h2 className="text-3xl sm:text-4xl font-black text-slate-900 font-display leading-tight">Facilities Management</h2>
+          <p className="text-slate-500 text-base sm:text-lg mt-2 font-medium">ဌာနများ၏ လစ်လပ်ရာထူးများအား စီမံခန့်ခွဲခြင်းနှင့် ဝန်ထမ်းခန့်အပ်ခြင်း</p>
         </div>
-        <button onClick={() => { handleFacTypeChange(fType); setIsAddOpen(true); }} className="bg-emerald-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-emerald-700 transition flex items-center gap-2 shadow-sm">
-          <Plus className="w-4 h-4" /> ဌာနအသစ် ထည့်ရန်
-        </button>
+        <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto">
+          <div className="relative group flex-1 sm:w-64">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-400 group-focus-within:text-emerald-500 transition-colors" />
+            <input 
+              type="text" 
+              placeholder="Search facilities..." 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/5 transition-all shadow-sm"
+            />
+          </div>
+          <button 
+            onClick={() => setShowNoParentOnly(!showNoParentOnly)} 
+            className={`px-4 py-3 rounded-xl border text-[13px] font-bold transition-all flex items-center justify-center gap-2 shadow-sm ${showNoParentOnly ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+          >
+            <Filter className="w-4 h-4" /> {showNoParentOnly ? 'ပင်မဌာနများသာ' : 'ပင်မဌာနများသာ ပြမည်'}
+          </button>
+          <button onClick={() => { handleFacTypeChange(fType); setIsAddOpen(true); }} className="bg-emerald-600 text-white px-6 py-3 rounded-xl text-[13px] font-bold hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 active:scale-95 shrink-0">
+            <Plus className="w-4 h-4" /> ဌာနအသစ် ထည့်သွင်းရန်
+          </button>
+        </div>
       </div>
 
-      {facilities.length === 0 ? (
-        <div className="py-12 text-center border-2 border-dashed border-slate-200 rounded-2xl">
-          <p className="text-slate-400 text-sm">မှတ်ပုံတင်ထားသော ဌာနများ မရှိသေးပါ။</p>
-        </div>
+      {Object.keys(locationGroups).length === 0 ? (
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="py-24 text-center glass-card rounded-3xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center"
+        >
+          <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-300 mb-4">
+            <Building className="w-8 h-8" />
+          </div>
+          <p className="text-slate-500 font-bold font-display">ကိုက်ညီသော ဌာနများ ရှာမတွေ့ပါ</p>
+          <button onClick={() => setSearchTerm('')} className="mt-4 text-emerald-600 text-sm font-bold hover:underline">Search အား ပယ်ဖျက်မည်</button>
+        </motion.div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {facilities.map(f => {
-            const locationStr = [f.state, f.district, f.township].filter(Boolean).join(' • ');
-            const parentName = f.parentFacilityId ? facilities.find(p => p.id === f.parentFacilityId)?.name : null;
-            
+        <div className="flex flex-col gap-10">
+          {Object.entries(locationGroups).map(([loc, facs]: [string, Facility[]]) => {
+            const isLocationExpanded = expandedLocations[loc] !== false; // expanded by default
             return (
-              <div key={f.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full hover:shadow-md transition">
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <div className="flex gap-2 items-center flex-wrap">
-                      <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase">{f.type}</span>
-                      {parentName && <span className="text-[10px] font-bold bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded border border-emerald-100">ပင်မဌာန: {parentName}</span>}
-                    </div>
-                    <h4 className="text-lg font-bold text-slate-800 mt-2">{f.name}</h4>
-                    {locationStr && <p className="text-[11px] text-slate-400 font-medium mt-1 flex items-center gap-1"><MapPin className="w-3 h-3" /> {locationStr}</p>}
+              <div key={loc} className="flex flex-col gap-4">
+                <button 
+                  onClick={() => toggleLocation(loc)} 
+                  className="flex items-center gap-3 text-left w-full hover:bg-slate-50 p-2 -ml-2 rounded-2xl transition-colors group"
+                >
+                  <div className={`p-1.5 rounded-lg transition-colors ${isLocationExpanded ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400 group-hover:bg-slate-200'}`}>
+                    <ChevronRight className={`w-4 h-4 transition-transform ${isLocationExpanded ? 'rotate-90' : ''}`} />
                   </div>
-                </div>
-
-                <div className="space-y-3 mt-2">
-                  {f.customQuotas.length === 0 && <p className="text-[11px] text-slate-400">ရာထူးသတ်မှတ်ချက် မရှိသေးပါ။</p>}
-                  {f.customQuotas.map(q => {
-                    const allowed = q.max || 0;
-                    const homeStaff = staffEntries.filter(s => s.facilityId === f.id && s.position === q.position);
-                    const occupied = homeStaff.length;
-                    const attachedOut = homeStaff.filter(s => s.currentFacilityId !== f.id).length;
-                    const attachedIn = staffEntries.filter(s => s.currentFacilityId === f.id && s.facilityId !== f.id && s.position === q.position).length;
-                    const vacancy = Math.max(0, allowed - occupied);
-                    const isOver = allowed > 0 && occupied > allowed;
-
-                    return (
-                      <div key={q.position} className={`flex flex-col p-3 rounded-lg border ${isOver ? 'bg-red-50/50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
-                        <div className="flex items-center justify-between border-b border-slate-200/60 pb-2 mb-2">
-                          <span className="text-[13px] font-bold text-slate-800">{q.position}</span>
-                          <button onClick={() => openRecruit(f.id, q.position)} className="px-3 py-1 bg-white border border-slate-200 text-slate-600 rounded shadow-sm text-[11px] font-semibold hover:border-emerald-500 hover:text-emerald-600 transition flex items-center gap-1">
-                            <Plus className="w-3 h-3" /> ဝန်ထမ်းခန့်ရန်
-                          </button>
-                        </div>
-                        <div className="grid grid-cols-2 gap-y-1.5 text-[11px]">
-                          <div className="text-slate-600">
-                            <span className="font-medium">Occupied:</span> <span className={`font-bold ${isOver ? 'text-red-600' : 'text-slate-800'}`}>{occupied}</span> <span className="text-slate-400">/ {allowed}</span>
-                          </div>
-                          <div className="text-slate-600">
-                            <span className="font-medium">Vacancy:</span> <span className={`font-bold ${vacancy > 0 ? 'text-red-500' : 'text-slate-800'}`}>{vacancy}</span>
-                          </div>
-                          <div className="text-slate-600">
-                            <span className="font-medium">Attached Out:</span> <span className={attachedOut > 0 ? 'text-amber-600 font-bold' : 'text-slate-400'}>{attachedOut}</span>
-                          </div>
-                          <div className="text-slate-600">
-                            <span className="font-medium">Attached In:</span> <span className={attachedIn > 0 ? 'text-purple-600 font-bold' : 'text-slate-400'}>{attachedIn}</span>
-                          </div>
-                        </div>
-
-                        {/* Occupied Staff CV Dropdown */}
-                        {(() => {
-                          const occupantList = staffEntries.filter(s => s.currentFacilityId === f.id && s.position === q.position);
-                          if (occupantList.length === 0) return null;
-                          return (
-                            <details className="mt-3 group/acc border border-slate-200 rounded-lg overflow-hidden bg-white">
-                              <summary className="bg-slate-100 p-2 text-[11px] font-bold text-slate-700 cursor-pointer flex justify-between items-center outline-none list-none transition hover:bg-slate-200/50">
-                                <span>Occupied Staff ({occupantList.length})</span>
-                                <span className="text-slate-400 group-open/acc:rotate-180 transition-transform text-[10px]">▼</span>
-                              </summary>
-                              <div className="p-2 flex flex-col gap-1.5 bg-white">
-                                {occupantList.map((staff, sIdx) => {
-                                  const isAttachedIn = staff.facilityId !== f.id;
-                                  return (
-                                    <div key={staff.id} className="flex justify-between p-2 rounded-md bg-slate-50 border border-slate-100 gap-2 items-start">
-                                      <div className="flex flex-col gap-1">
-                                        <div className="flex flex-col">
-                                          <span className="text-xs font-semibold text-slate-800">
-                                            Staff {sIdx + 1} {isAttachedIn && <span className="text-purple-600 text-[10px] ml-1">(Attached)</span>}
-                                          </span>
-                                          <span className={`text-[10px] font-medium ${staff.activeStatus === 'Leave' ? 'text-yellow-600' : staff.activeStatus === 'Other' ? 'text-red-600' : 'text-emerald-600'}`}>
-                                            [{staff.activeStatus || 'Active'}]
-                                          </span>
-                                        </div>
-                                        {(isAttachedIn && staff.reason) && (
-                                          <p className="text-[10px] text-slate-500"><span className="font-semibold text-slate-600">တွဲဖက်:</span> {staff.reason}</p>
-                                        )}
-                                        {((staff.activeStatus === 'Leave' || staff.activeStatus === 'Other') && staff.activeReason) && (
-                                          <p className="text-[10px] text-slate-500"><span className="font-semibold text-slate-600">အခြေအနေ:</span> {staff.activeReason}</p>
-                                        )}
-                                      </div>
-                                      
-                                      <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 shrink-0">
-                                        <button onClick={() => {
-                                          openRecruit(f.id, q.position);
-                                          setREditingStaffId(staff.id);
-                                          setRIsExternal(staff.facilityId === -1);
-                                          if (staff.facilityId !== -1 && staff.facilityId !== f.id) {
-                                            setRSourceFac(staff.facilityId.toString());
-                                          }
-                                          if (staff.facilityId === -1) {
-                                            setRExtName(staff.externalFacilityName || '');
-                                          }
-                                          setRDuty(staff.dutyStatus === 'Attached' ? 'attach' : 'main');
-                                          setRReason(staff.reason || '');
-                                          setRActiveStatus(staff.activeStatus || 'Active');
-                                          setRActiveReason(staff.activeReason || '');
-                                        }} className="p-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded hover:bg-blue-100 transition" title="Edit Staff Status">
-                                          <Edit2 className="w-3 h-3" />
-                                        </button>
-                                        
-                                        {!staff.cv ? (
-                                          <label className="cursor-pointer px-3 py-1.5 bg-white border border-slate-300 text-slate-700 text-[11px] font-semibold rounded hover:border-emerald-500 hover:text-emerald-600 transition truncate max-w-[120px] text-center">
-                                            <input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={(e) => {
-                                              const file = e.target.files?.[0];
-                                              if (file) {
-                                                const updated = { ...staff, cv: file.name };
-                                                updateStaff(updated);
-                                              }
-                                              e.target.value = '';
-                                            }} />
-                                            + Upload CV
-                                          </label>
-                                        ) : (
-                                          <div className="flex items-center gap-1.5">
-                                            <button onClick={() => alert(`Simulating opening document:\n${staff.cv}`)} className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-semibold rounded hover:bg-blue-100 transition flex items-center gap-1.5 truncate max-w-[130px]">
-                                              <span className="truncate">{staff.cv}</span>
-                                            </button>
-                                            <label className="cursor-pointer p-1.5 text-slate-400 hover:text-emerald-600 transition bg-white border border-slate-200 rounded">
-                                              <input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={(e) => {
-                                                const file = e.target.files?.[0];
-                                                if (file) {
-                                                  const updated = { ...staff, cv: file.name };
-                                                  updateStaff(updated);
-                                                }
-                                                e.target.value = '';
-                                              }} />
-                                              <Edit2 className="w-3 h-3" />
-                                            </label>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </details>
-                          );
-                        })()}
+                  <MapPin className={`w-5 h-5 ${isLocationExpanded ? 'text-emerald-500' : 'text-slate-400'}`} />
+                  <span className="text-xl font-black text-slate-800 font-display">{loc}</span>
+                  <span className="text-sm font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-xl ml-auto hidden sm:block">
+                    {facs.length} Facilities
+                  </span>
+                </button>
+                
+                <AnimatePresence>
+                  {isLocationExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden pl-2"
+                    >
+                      <div className="flex flex-col gap-8 py-2">
+                        {facs.map(f => renderFacilityCard(f))}
                       </div>
-                    )
-                  })}
-                </div>
-
-                <div className="mt-6 pt-4 flex justify-end gap-3 border-t border-slate-100">
-                  <button onClick={() => openEditFacility(f)} className="text-slate-400 hover:text-blue-600 text-sm transition flex items-center gap-1"><Edit2 className="w-4 h-4" /> ရာထူးပြင်ဆင်ရန်</button>
-                  <button onClick={() => safeDelete(() => deleteFacility(f.id), `ဌာန '${f.name}' ကို ဖျက်ပစ်မည်မှာ သေချာပါသလား?`)} className="text-slate-300 hover:text-red-500 text-sm transition flex items-center gap-1"><Trash2 className="w-4 h-4" /> ဖျက်မည်</button>
-                </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
-            )
+            );
           })}
         </div>
       )}
@@ -360,11 +587,29 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                     {facilityTypes.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
-                <div>
+                <div className="col-span-2">
                   <label className="block text-xs text-slate-500 font-medium mb-1">ပင်မဌာန (ရွေးချယ်နိုင်သည်)</label>
-                  <select value={fParent} onChange={e => setFParent(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500 bg-white">
-                    <option value="">(ပင်မဌာန မရှိပါ)</option>
-                    {facilities.map(t => <option key={t.id} value={t.id}>{t.name} ({t.type})</option>)}
+                  <FacilitySelect 
+                    value={fParent} 
+                    onChange={setFParent} 
+                    facilities={facilities} 
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-500 font-medium mb-1">လုပ်ငန်းဆောင်ရွက်မှု အခြေအနေ</label>
+                  <select value={fStatus} onChange={e => setFStatus(e.target.value as any)} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500 bg-white">
+                    <option value="Functioning">Functioning (လုပ်ငန်းဆောင်ရွက်ဆဲ)</option>
+                    <option value="Non-Functioning">Non-Functioning (လုပ်ငန်းရပ်နားထား)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 font-medium mb-1">အဆောက်အဦ အခြေအနေ</label>
+                  <select value={fInfraStatus} onChange={e => setFInfraStatus(e.target.value as any)} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500 bg-white">
+                    <option value="Standard">Standard (စံချိန်မီ)</option>
+                    <option value="Sub-standard">Sub-standard (စံချိန်မမီ)</option>
                   </select>
                 </div>
               </div>
@@ -397,12 +642,51 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
       {isEditFacOpen && activeFacility && (
         <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-2xl p-6 shadow-xl relative max-h-[90vh] flex flex-col">
-            <h3 className="text-xl font-bold text-slate-800 mb-2">{activeFacility.name}</h3>
-            <p className="text-sm text-slate-500 mb-6 border-b border-slate-100 pb-4">ရာထူးသတ်မှတ်ချက်များ ပြင်ဆင်ရန် (Quota Overrides)</p>
-            
-            <div className="flex-1 overflow-y-auto space-y-3 custom-scroll pr-2">
+            <h3 className="text-xl font-bold text-slate-800 mb-2">ဌာနအချက်အလက်များ ပြင်ဆင်ရန်</h3>
+            <div className="flex-1 overflow-y-auto space-y-4 custom-scroll pr-2">
+              
+              <div className="space-y-4 mb-4 pb-4 border-b border-slate-100">
+                <div>
+                  <label className="block text-xs text-slate-500 font-medium mb-1">ဌာနအမည်</label>
+                  <input 
+                    type="text" 
+                    value={activeFacility.name} 
+                    onChange={e => setActiveFacility({...activeFacility, name: e.target.value})}
+                    className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500 bg-white"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs text-slate-500 font-medium mb-1">ပင်မဌာန (ရွေးချယ်နိုင်သည်)</label>
+                  <FacilitySelect 
+                    value={activeFacility.parentFacilityId} 
+                    onChange={val => setActiveFacility({...activeFacility, parentFacilityId: val})} 
+                    facilities={facilities} 
+                    excludeId={activeFacility.id}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 mt-4">
+                <div>
+                  <label className="block text-xs text-slate-500 font-medium mb-1">လုပ်ငန်းဆောင်ရွက်မှု အခြေအနေ</label>
+                  <select value={activeFacility.status || 'Functioning'} onChange={e => setActiveFacility({...activeFacility, status: e.target.value as 'Functioning' | 'Non-Functioning'})} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500 bg-white">
+                    <option value="Functioning">Functioning (လုပ်ငန်းဆောင်ရွက်ဆဲ)</option>
+                    <option value="Non-Functioning">Non-Functioning (လုပ်ငန်းရပ်နားထား)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 font-medium mb-1">အဆောက်အဦ အခြေအနေ</label>
+                  <select value={activeFacility.infrastructureStatus || 'Standard'} onChange={e => setActiveFacility({...activeFacility, infrastructureStatus: e.target.value as 'Standard' | 'Sub-standard'})} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500 bg-white">
+                    <option value="Standard">Standard (စံချိန်မီ)</option>
+                    <option value="Sub-standard">Sub-standard (စံချိန်မမီ)</option>
+                  </select>
+                </div>
+              </div>
+
+              <p className="text-sm text-slate-500 mb-2 mt-4">ရာထူးသတ်မှတ်ချက်များ ပြင်ဆင်ရန် (Quota Overrides)</p>
+              
               {activeFacility.customQuotas.map((q, idx) => (
-                <div key={idx} className="flex items-center justify-between bg-slate-50 p-3 border border-slate-200 rounded-lg">
+                <div key={q.position + idx} className="flex items-center justify-between bg-slate-50 p-3 border border-slate-200 rounded-lg">
                   <span className="text-sm font-semibold text-slate-700">{q.position}</span>
                   <div className="flex items-center gap-3">
                     <input 
@@ -437,6 +721,51 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                   {positionsList.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
+
+              {(state.subdepartmentsMap[activeFacility.type] || []).length > 0 && (
+                <div className="mt-6 p-4 border border-emerald-100 bg-emerald-50/30 rounded-xl">
+                  <h4 className="text-xs font-bold text-emerald-800 mb-2 uppercase tracking-wide">Add Subdepartment (လက်အောက်ခံ ဌာနခွဲထည့်ရန်)</h4>
+                  <div className="flex gap-2">
+                    <select id="subdep-select" className="flex-1 p-2.5 border border-emerald-200 rounded-lg text-sm outline-none focus:border-emerald-500 bg-white">
+                      <option value="">ရွေးချယ်ပါ...</option>
+                      {(state.subdepartmentsMap[activeFacility.type] || []).map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                    <button onClick={() => {
+                      const sel = document.getElementById('subdep-select') as HTMLSelectElement;
+                      if (!sel || !sel.value) return;
+                      const subType = sel.value;
+                      const subName = `${activeFacility.name} - ${subType}`;
+                      // Check if already exists
+                      if (facilities.find(f => f.parentFacilityId === activeFacility.id && f.type === subType)) {
+                         return alert('This subdepartment already exists for this facility.');
+                      }
+
+                      const defaults = globalDefaultQuotas.filter(q => q.type === subType);
+                      const customQuotas: CustomQuota[] = defaults.map(q => ({ position: q.position, max: q.max }));
+                      
+                      addFacility({
+                        id: Date.now() + Math.floor(Math.random() * 1000), 
+                        name: subName, 
+                        type: subType, 
+                        state: activeFacility.state, 
+                        district: activeFacility.district, 
+                        township: activeFacility.township, 
+                        customQuotas, 
+                        parentFacilityId: activeFacility.id,
+                        status: 'Functioning', 
+                        infrastructureStatus: 'Standard'
+                      });
+                      
+                      sel.value = "";
+                      alert(`Successfully added ${subType} as a subdepartment.`);
+                    }} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm hover:bg-emerald-700 transition">
+                       Add
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="mt-6 pt-4 flex justify-end gap-3 border-t border-slate-100">
@@ -583,6 +912,35 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* CV Preview Modal */}
+      {cvPreview && (
+        <div className="fixed inset-0 bg-slate-900/80 flex items-center justify-center z-[70] p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-4xl h-[85vh] rounded-2xl flex flex-col shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-100 bg-slate-50">
+              <h3 className="font-bold text-slate-700 flex items-center gap-2">
+                <FileText className="w-5 h-5 text-emerald-600" />
+                {cvPreview.name}
+              </h3>
+              <div className="flex items-center gap-2">
+                <a href={cvPreview.dataUrl} download={cvPreview.name} className="px-3 py-1.5 bg-emerald-100 text-emerald-700 text-sm font-bold rounded-lg hover:bg-emerald-200 transition-colors flex items-center gap-1">
+                   <Download className="w-4 h-4" /> Download
+                </a>
+                <button onClick={() => setCvPreview(null)} className="px-3 py-1.5 bg-slate-200 text-slate-600 text-sm font-bold rounded-lg hover:bg-slate-300 transition-colors">
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 bg-slate-100 overflow-auto flex items-center justify-center p-4">
+              {cvPreview.dataUrl.startsWith('data:image/') ? (
+                <img src={cvPreview.dataUrl} alt={cvPreview.name} className="max-w-full max-h-full object-contain rounded shadow-sm" />
+              ) : (
+                <iframe src={cvPreview.dataUrl} title={cvPreview.name} className="w-full h-full bg-white rounded shadow-sm border-0" />
+              )}
+            </div>
           </div>
         </div>
       )}
