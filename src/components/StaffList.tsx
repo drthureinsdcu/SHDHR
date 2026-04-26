@@ -1,10 +1,23 @@
 import React, { useState } from 'react';
-import { FileText, Download, Trash2, Search, Filter, MapPin, User, ArrowRight, Plus, Eye } from 'lucide-react';
+import { FileText, Download, Trash2, Search, Filter, MapPin, User, ArrowRight, Plus, Eye, Edit2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Staff } from '../types';
+import { useRole } from '../contexts/RoleContext';
 
 export default function StaffList({ state }: { state: ReturnType<typeof import('../useAppState').useAppState> }) {
+  const { role, allowedTownship } = useRole();
   const { staffEntries, facilities, deleteStaff, updateStaff } = state;
+
+  const canEditStaff = (fId: number) => {
+    if (role === 'admin') return true;
+    if (role === 'manager') {
+      if (!allowedTownship) return true;
+      const f = facilities.find(x => x.id === fId);
+      if (f && f.township === allowedTownship) return true;
+    }
+    return false;
+  };
+
   const [filterState, setFilterState] = useState('');
   const [filterDistrict, setFilterDistrict] = useState('');
   const [filterTownship, setFilterTownship] = useState('');
@@ -15,6 +28,116 @@ export default function StaffList({ state }: { state: ReturnType<typeof import('
   const [viewerOpen, setViewerOpen] = useState(false);
   const [activeStaff, setActiveStaff] = useState<Staff | null>(null);
   const [cvPreview, setCvPreview] = useState<{ name: string, dataUrl: string } | null>(null);
+
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [eId, setEId] = useState<number | null>(null);
+  const [eStaffName, setEStaffName] = useState('');
+  const [eCurrFac, setECurrFac] = useState('');
+  const [ePos, setEPos] = useState('');
+  const [eDuty, setEDuty] = useState<'Present'|'Attached'>('Present');
+  const [eIsExt, setEIsExt] = useState(false);
+  const [eSourceFac, setESourceFac] = useState('');
+  const [eExtName, setEExtName] = useState('');
+  const [eReason, setEReason] = useState('');
+  const [eActiveStatus, setEActiveStatus] = useState<'Active'|'Leave'|'Other'>('Active');
+  const [eActiveReason, setEActiveReason] = useState('');
+  const [eCv, setECv] = useState('');
+  const [eCvData, setECvData] = useState('');
+
+  const editableFacilities = facilities.filter(f => {
+    if (role === 'admin') return true;
+    if (role === 'manager' && !allowedTownship) return true;
+    if (role === 'manager' && f.township === allowedTownship) return true;
+    return false;
+  });
+
+  const openAddStaff = () => {
+    setEId(null);
+    setEStaffName('');
+    setECurrFac('');
+    setEPos('');
+    setEDuty('Present');
+    setEIsExt(false);
+    setESourceFac('');
+    setEExtName('');
+    setEReason('');
+    setEActiveStatus('Active');
+    setEActiveReason('');
+    setECv('');
+    setECvData('');
+    setIsEditorOpen(true);
+  };
+
+  const openEditStaff = (s: Staff) => {
+    setEId(s.id);
+    setEStaffName(s.name || '');
+    setECurrFac(String(s.currentFacilityId));
+    setEPos(s.position);
+    setEDuty(s.dutyStatus);
+    setEIsExt(s.facilityId === -1);
+    setESourceFac(s.facilityId !== -1 && s.facilityId !== s.currentFacilityId ? String(s.facilityId) : '');
+    setEExtName(s.externalFacilityName || '');
+    setEReason(s.reason || '');
+    setEActiveStatus(s.activeStatus || 'Active');
+    setEActiveReason(s.activeReason || '');
+    setECv(s.cv || '');
+    setECvData(s.cvDataUrl || '');
+    setIsEditorOpen(true);
+  };
+
+  const saveStaff = () => {
+    if (!eStaffName.trim()) return alert('Please enter staff name');
+    if (!eCurrFac) return alert('Please select current facility');
+    if (!ePos) return alert('Please select position');
+    
+    let facId = Number(eCurrFac);
+    let extName = '';
+    
+    if (eDuty === 'Attached') {
+        if (eIsExt) {
+            facId = -1;
+            extName = eExtName;
+        } else {
+            if (!eSourceFac) return alert('Please select original facility');
+            facId = Number(eSourceFac);
+        }
+    }
+    
+    if (!eId && facId !== -1) {
+        const targetFac = facilities.find(f => f.id === facId);
+        if (targetFac) {
+            const quota = targetFac.customQuotas.find(q => q.position === ePos);
+            if (quota) {
+                const occupied = state.staffEntries.filter(s => s.facilityId === facId && s.position === ePos).length;
+                if (occupied >= quota.max) {
+                     if (!window.confirm(`သတိပေးချက်: ဤဌာနအတွက် ${ePos} ရာထူး သတ်မှတ်အရေအတွက် (${quota.max}) ပြည့်နေပါသည်။ ဆက်လက်ထည့်သွင်းလိုပါသလား?`)) {
+                         return;
+                     }
+                }
+            }
+        }
+    }
+    
+    const staffData: Staff = {
+        id: eId || Date.now() + Math.random(),
+        name: eStaffName,
+        facilityId: facId,
+        currentFacilityId: Number(eCurrFac),
+        externalFacilityName: extName,
+        position: ePos,
+        dutyStatus: eDuty,
+        reason: eDuty === 'Attached' ? eReason : '',
+        activeStatus: eActiveStatus,
+        activeReason: eActiveStatus !== 'Active' ? eActiveReason : '',
+        cv: eCv,
+        cvDataUrl: eCvData
+    };
+    
+    if (eId) state.updateStaff(staffData);
+    else state.addStaff(staffData);
+    
+    setIsEditorOpen(false);
+  };
 
   // Delete confirm state
   const [deleteConfirm, setDeleteConfirm] = useState<{ step: 1 | 2, message: string, action: () => void } | null>(null);
@@ -100,6 +223,11 @@ export default function StaffList({ state }: { state: ReturnType<typeof import('
               className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium outline-none focus:border-emerald-500 transition-all shadow-sm"
             />
           </div>
+          {role !== 'viewer' && (
+            <button onClick={openAddStaff} className="bg-emerald-600 text-white px-6 py-3 rounded-xl text-[13px] font-bold hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 active:scale-95 shrink-0">
+              <Plus className="w-4 h-4" /> Add Staff
+            </button>
+          )}
           <button onClick={exportCSV} className="bg-slate-900 text-white px-6 py-3 rounded-xl text-[13px] font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2 shadow-lg shadow-slate-200 active:scale-95 shrink-0">
             <Download className="w-4 h-4" /> Export CSV
           </button>
@@ -255,9 +383,16 @@ export default function StaffList({ state }: { state: ReturnType<typeof import('
                           <button onClick={()=>{setActiveStaff(s); setViewerOpen(true)}} className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all" title="View Details">
                             <FileText className="w-5 h-5" />
                           </button>
-                          <button onClick={()=>safeDelete(() => deleteStaff(s.id), 'ဤဝန်ထမ်းမှတ်တမ်းကို ဖျက်ပစ်မည်မှာ သေချာပါသလား?')} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all" title="Delete record">
-                            <Trash2 className="w-5 h-5" />
-                          </button>
+                          {canEditStaff(s.facilityId) && (
+                            <button onClick={()=>openEditStaff(s)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Edit Details">
+                              <Edit2 className="w-5 h-5" />
+                            </button>
+                          )}
+                          {canEditStaff(s.facilityId) && (
+                            <button onClick={()=>safeDelete(() => deleteStaff(s.id), 'ဤဝန်ထမ်းမှတ်တမ်းကို ဖျက်ပစ်မည်မှာ သေချာပါသလား?')} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all" title="Delete record">
+                              <Trash2 className="w-5 h-5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </motion.tr>
@@ -352,6 +487,87 @@ export default function StaffList({ state }: { state: ReturnType<typeof import('
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {isEditorOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-md rounded-2xl p-6 shadow-xl relative max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-bold text-slate-800 mb-4">{eId ? 'ဝန်ထမ်းအချက်အလက် ပြင်ဆင်ရန်' : 'ဝန်ထမ်းသစ် ထည့်သွင်းရန်'}</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">အမည် <span className="text-red-500">*</span></label>
+                <input type="text" value={eStaffName} onChange={e=>setEStaffName(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-emerald-500" placeholder="Staff Name" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">လက်ရှိတာဝန်ကျ ဌာန / Current Facility <span className="text-red-500">*</span></label>
+                <select value={eCurrFac} onChange={e=>setECurrFac(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-emerald-500">
+                  <option value="">ရွေးချယ်ပါ...</option>
+                  {editableFacilities.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">ရာထူး <span className="text-red-500">*</span></label>
+                <select value={ePos} onChange={e=>setEPos(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-emerald-500">
+                  <option value="">ရွေးချယ်ပါ...</option>
+                  {state.positionsList.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                </select>
+              </div>
+              <div>
+                 <label className="block text-xs font-semibold text-slate-600 mb-1">တာဝန်ထမ်းဆောင်မှု အခြေအနေ (Duty Status)</label>
+                 <select value={eDuty} onChange={e=>setEDuty(e.target.value as any)} className="w-full p-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-emerald-500">
+                   <option value="Present">ပင်မတာဝန် / Main Duty (Present)</option>
+                   <option value="Attached">တွဲဖက် / Attached</option>
+                 </select>
+              </div>
+              
+              {eDuty === 'Attached' && (
+                  <div className="p-3 bg-purple-50 rounded-lg space-y-3 border border-purple-100">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-semibold text-purple-700">မည်သည့်ဌာနမှ လာရောက်သနည်း?</label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" checked={eIsExt} onChange={e=>setEIsExt(e.target.checked)} className="accent-purple-600 w-3.5 h-3.5" />
+                        <span className="text-[11px] font-bold text-purple-600">အခြားတိုင်း/ပြည်နယ်မှ</span>
+                      </label>
+                    </div>
+                    {eIsExt ? (
+                      <input type="text" placeholder="တိုင်းဒေသကြီး/ပြည်နယ်နှင့် ဌာနအမည်..." value={eExtName} onChange={e=>setEExtName(e.target.value)} className="w-full p-2.5 border border-purple-200 rounded-lg text-sm outline-none focus:border-purple-500 bg-white" />
+                    ) : (
+                      <select value={eSourceFac} onChange={e=>setESourceFac(e.target.value)} className="w-full p-2.5 border border-purple-200 rounded-lg text-sm outline-none focus:border-purple-500 bg-white">
+                        <option value="">မူလ ဌာနရွေးချယ်ပါ...</option>
+                        {facilities.filter(f => f.id.toString() !== eCurrFac).map(f => (
+                          <option key={f.id} value={f.id}>{f.name}</option>
+                        ))}
+                      </select>
+                    )}
+                    <div>
+                      <label className="block text-[11px] font-semibold text-purple-600 mb-1">တွဲဖက်ရသည့် အကြောင်းပြချက် <span className="text-red-500">*</span></label>
+                      <input type="text" value={eReason} onChange={e=>setEReason(e.target.value)} className="w-full p-2.5 border border-purple-200 rounded-lg text-sm outline-none focus:border-purple-500 bg-white" placeholder="ဥပမာပြရန်..." />
+                    </div>
+                  </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">အလုပ်ဆင်းနိုင်မှု (Active Status)</label>
+                <select value={eActiveStatus} onChange={e=>{
+                    setEActiveStatus(e.target.value as any);
+                    if (e.target.value === 'Active') setEActiveReason('');
+                }} className="w-full p-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-emerald-500">
+                  <option value="Active">အလုပ်ဆင်း (Active)</option>
+                  <option value="Leave">ခွင့် (Leave)</option>
+                  <option value="Other">အခြား (Other)</option>
+                </select>
+                {eActiveStatus !== 'Active' && (
+                  <input type="text" placeholder="အကြောင်းပြချက်..." value={eActiveReason} onChange={e=>setEActiveReason(e.target.value)} className="w-full mt-2 p-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-emerald-500" />
+                )}
+              </div>
+            </div>
+            
+            <div className="mt-6 flex justify-end gap-3 pt-4 border-t border-slate-100">
+              <button onClick={()=>setIsEditorOpen(false)} className="px-5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">ပယ်ဖျက်မည်</button>
+              <button onClick={saveStaff} className="bg-emerald-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 transition">အတည်ပြုမည်</button>
+            </div>
           </div>
         </div>
       )}

@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
-import { Trash2, Plus, ChevronRight, Map, LayoutGrid, ShieldCheck, Edit2, TriangleAlert } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Trash2, Plus, ChevronRight, Map, LayoutGrid, ShieldCheck, Edit2, TriangleAlert, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { RegionData, Quota, Position } from '../types';
+import { db } from '../firebase';
+import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 
 export default function Settings({ state }: { state: ReturnType<typeof import('../useAppState').useAppState> }) {
   const { 
@@ -12,7 +14,7 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
     staffEntries
   } = state;
 
-  const [activeTab, setActiveTab] = useState<'types'|'quotas'|'locations'|'audit'|'designations'>('types');
+  const [activeTab, setActiveTab] = useState<'types'|'quotas'|'locations'|'audit'|'designations'|'users'>('types');
   const [isTypeOpen, setIsTypeOpen] = useState(false);
   const [newTypeName, setNewTypeName] = useState('');
   const [newTypeCat, setNewTypeCat] = useState<'Public Health' | 'Clinical'>('Public Health');
@@ -36,6 +38,82 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
   const [posEditRank, setPosEditRank] = useState(99);
 
   const [filterType, setFilterType] = useState(facilityTypes[0]?.name || '');
+
+  // Users state
+  const [dbUsers, setDbUsers] = useState<any[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+
+  const [isAddUserOpen, setIsAddUserOpen] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPass, setNewUserPass] = useState('');
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserRole, setNewUserRole] = useState<'admin'|'manager'|'viewer'>('viewer');
+  const [newUserTownship, setNewUserTownship] = useState('');
+  const [creatingUser, setCreatingUser] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === 'users') {
+      loadUsers();
+    }
+  }, [activeTab]);
+
+  const loadUsers = async () => {
+    setLoadingUsers(true);
+    try {
+      const snap = await getDocs(collection(db, 'users'));
+      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setDbUsers(list);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  const createUser = async () => {
+    if (!newUserEmail || !newUserPass || !newUserName) return alert('Please fill in email, password, and name');
+    setCreatingUser(true);
+    try {
+      const { initializeApp } = await import('firebase/app');
+      const { getAuth, createUserWithEmailAndPassword, updateProfile } = await import('firebase/auth');
+      const { default: config } = await import('../../firebase-applet-config.json');
+      
+      const secondaryApp = initializeApp(config, 'SecondaryApp' + Date.now());
+      const secondaryAuth = getAuth(secondaryApp);
+      
+      const userCred = await createUserWithEmailAndPassword(secondaryAuth, newUserEmail, newUserPass);
+      await updateProfile(userCred.user, { displayName: newUserName });
+      
+      const { setDoc } = await import('firebase/firestore');
+      await setDoc(doc(db, 'users', userCred.user.uid), {
+        email: newUserEmail,
+        name: newUserName,
+        role: newUserRole,
+        allowedTownship: newUserRole === 'admin' ? null : (newUserTownship || null)
+      });
+      
+      await secondaryAuth.signOut();
+      
+      setIsAddUserOpen(false);
+      setNewUserEmail(''); setNewUserPass(''); setNewUserName(''); setNewUserRole('viewer'); setNewUserTownship('');
+      loadUsers();
+    } catch (e: any) {
+      console.error(e);
+      alert('Error creating user: ' + e.message);
+    } finally {
+      setCreatingUser(false);
+    }
+  };
+
+  const updateUser = async (userId: string, changes: any) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), changes);
+      setDbUsers(prev => prev.map(u => u.id === userId ? { ...u, ...changes } : u));
+    } catch (e) {
+      console.error(e);
+      alert('Failed to update user');
+    }
+  };
 
   // Delete confirm state
   const [deleteConfirm, setDeleteConfirm] = useState<{ step: 1 | 2, message: string, action: () => void } | null>(null);
@@ -279,6 +357,7 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
     { id: 'quotas', label: 'Default Quotas', icon: ShieldCheck },
     { id: 'designations', label: 'Designations', icon: LayoutGrid },
     { id: 'locations', label: 'Geography', icon: Map },
+    { id: 'users', label: 'User Management', icon: Users },
     { id: 'audit', label: 'Health Audit', icon: ShieldCheck },
   ] as const;
 
@@ -691,6 +770,93 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
                </div>
             </div>
           )}
+          {activeTab === 'users' && (
+            <div className="glass-card rounded-[2rem] border border-slate-200/60 p-8 shadow-sm">
+               <div className="flex justify-between items-center mb-8">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-500">
+                      <Users className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black text-slate-800 font-display">User Management</h3>
+                      <p className="text-[11px] text-slate-400 font-bold uppercase tracking-widest leading-none mt-1">Manage Roles & Permissions</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setIsAddUserOpen(true)} className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-[13px] font-bold shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center gap-2 active:scale-95">
+                    <Plus className="w-4 h-4" /> Add User
+                  </button>
+               </div>
+
+               {loadingUsers ? (
+                 <div className="flex justify-center p-8 text-slate-400">Loading users...</div>
+               ) : (
+                 <div className="bg-slate-50/50 rounded-2xl border border-slate-200/60 overflow-hidden">
+                    <table className="w-full text-left">
+                      <thead className="bg-white border-b border-slate-100 text-[10px] text-slate-400 uppercase tracking-widest font-black">
+                        <tr>
+                          <th className="px-6 py-4">Name & Email</th>
+                          <th className="px-6 py-4 text-center">Role</th>
+                          <th className="px-6 py-4 text-center">Managed Township</th>
+                          <th className="px-6 py-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-sm">
+                        {dbUsers.map(u => (
+                          <tr key={u.id} className="hover:bg-white transition-colors group">
+                            <td className="px-6 py-4">
+                               <p className="font-bold text-slate-800">{u.name || 'Unnamed'}</p>
+                               <p className="text-xs text-slate-400">{u.email}</p>
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                               <select 
+                                 value={u.role || 'viewer'} 
+                                 onChange={(e) => updateUser(u.id, { role: e.target.value })}
+                                 className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-indigo-500"
+                               >
+                                 <option value="admin">Admin</option>
+                                 <option value="manager">Manager</option>
+                                 <option value="viewer">Viewer</option>
+                               </select>
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                               <select
+                                 value={u.allowedTownship || ''}
+                                 onChange={(e) => updateUser(u.id, { allowedTownship: e.target.value || null })}
+                                 className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-indigo-500"
+                                 disabled={u.role === 'admin'}
+                               >
+                                 <option value="">-- All Townships --</option>
+                                 {locations.flatMap(r => r.districts.flatMap(d => d.townships)).sort().map(t => (
+                                   <option key={t} value={t}>{t}</option>
+                                 ))}
+                               </select>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                               <button 
+                                 onClick={async () => {
+                                   if (!confirm('Are you sure you want to delete this user profile? Note: This does not delete their Google/Firebase Auth account.')) return;
+                                   const { deleteDoc } = await import('firebase/firestore');
+                                   try {
+                                     await deleteDoc(doc(db, 'users', u.id));
+                                     setDbUsers(prev => prev.filter(x => x.id !== u.id));
+                                   } catch(e) {
+                                     alert('Error deleting user');
+                                   }
+                                 }} 
+                                 className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                               >
+                                 <Trash2 className="w-4 h-4" />
+                               </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                 </div>
+               )}
+            </div>
+          )}
+
           {activeTab === 'audit' && (
             <div className="space-y-8">
               <div className="glass-card rounded-[2rem] border border-slate-200/60 p-8 shadow-sm">
@@ -1102,6 +1268,57 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
           </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {isAddUserOpen && (
+           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl relative overflow-hidden">
+                 <div className="flex justify-between items-start mb-6">
+                   <h3 className="text-xl font-black text-slate-800 font-display">Add User</h3>
+                 </div>
+                 <div className="space-y-4">
+                   <div>
+                     <label className="block text-xs font-bold text-slate-500 mb-1">Email</label>
+                     <input type="email" value={newUserEmail} onChange={e=>setNewUserEmail(e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm" placeholder="user@example.com" />
+                   </div>
+                   <div>
+                     <label className="block text-xs font-bold text-slate-500 mb-1">Password</label>
+                     <input type="password" value={newUserPass} onChange={e=>setNewUserPass(e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm" placeholder="Minimal 6 chars" />
+                   </div>
+                   <div>
+                     <label className="block text-xs font-bold text-slate-500 mb-1">Display Name</label>
+                     <input type="text" value={newUserName} onChange={e=>setNewUserName(e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm" placeholder="Full Name" />
+                   </div>
+                   <div>
+                     <label className="block text-xs font-bold text-slate-500 mb-1">Role</label>
+                     <select value={newUserRole} onChange={e=>setNewUserRole(e.target.value as any)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm">
+                       <option value="viewer">Viewer</option>
+                       <option value="manager">Manager</option>
+                       <option value="admin">Admin</option>
+                     </select>
+                   </div>
+                   {newUserRole === 'manager' && (
+                     <div>
+                       <label className="block text-xs font-bold text-slate-500 mb-1">Managed Township (Optional)</label>
+                       <select value={newUserTownship} onChange={e=>setNewUserTownship(e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 text-sm">
+                         <option value="">-- All Townships --</option>
+                         {locations.flatMap(r => r.districts.flatMap(d => d.townships)).sort().map(t => (
+                           <option key={t} value={t}>{t}</option>
+                         ))}
+                       </select>
+                     </div>
+                   )}
+                 </div>
+                 <div className="mt-8 flex gap-3">
+                   <button onClick={() => setIsAddUserOpen(false)} className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-all">Cancel</button>
+                   <button onClick={createUser} disabled={creatingUser} className="flex-1 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
+                     {creatingUser ? 'Creating...' : 'Create Auth User'}
+                   </button>
+                 </div>
+              </motion.div>
+           </div>
+        )}
+      </AnimatePresence>
 
       {deleteConfirm && (
         <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[60] p-4 backdrop-blur-sm animate-in fade-in">

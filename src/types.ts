@@ -25,6 +25,7 @@ export interface Facility {
 
 export interface Staff {
   id: number;
+  name?: string;
   facilityId: number; // Home facility ID (-1 if external)
   currentFacilityId: number; // Dispatched to this facility
   externalFacilityName?: string;

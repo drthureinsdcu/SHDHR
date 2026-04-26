@@ -185,8 +185,8 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 p-4 md:p-10 lg:p-12 mt-16 md:mt-0 min-w-0 bg-slate-50/30">
-        <div className="max-w-7xl mx-auto">
+      <main className={`flex-1 ${activeTab === 'facilities' ? 'p-4 md:p-6 lg:p-8' : 'p-4 md:p-10 lg:p-12'} mt-16 md:mt-0 min-w-0 bg-slate-50/30`}>
+        <div className={`${activeTab === 'facilities' ? 'max-w-none' : 'max-w-7xl'} mx-auto`}>
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}

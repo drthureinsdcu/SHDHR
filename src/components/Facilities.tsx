@@ -6,8 +6,36 @@ import FacilitySelect from './FacilitySelect';
 import { useRole } from '../contexts/RoleContext';
 
 export default function Facilities({ state }: { state: ReturnType<typeof import('../useAppState').useAppState> }) {
-  const { role } = useRole();
+  const { role, allowedTownship } = useRole();
   const { facilities, facilityTypes, globalDefaultQuotas, addFacility, updateFacility, deleteFacility, staffEntries, positionsList, addStaff, updateStaff } = state;
+
+  const openAddFacility = () => {
+    handleFacTypeChange(fType);
+    if (role === 'manager' && allowedTownship) {
+      // Find state and district
+      for (const r of state.locations) {
+        for (const d of r.districts) {
+          if (d.townships.includes(allowedTownship)) {
+            setFState(r.name);
+            setFDistrict(d.name);
+            setFTownship(allowedTownship);
+            break;
+          }
+        }
+      }
+    }
+    setIsAddOpen(true);
+  };
+
+  const canEditFacility = (township?: string) => {
+    if (role === 'admin') return true;
+    if (role === 'manager') {
+      if (!allowedTownship) return true; // If no specific township assigned, they can manage everything (or restrict them to none? Typically no assigned means everything, or restrict? Wait, I should make "restricted if specified")
+      if (township && township === allowedTownship) return true;
+    }
+    return false;
+  };
+
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isRecruitOpen, setIsRecruitOpen] = useState(false);
   const [isEditFacOpen, setIsEditFacOpen] = useState(false);
@@ -46,6 +74,9 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
   const [rActiveStatus, setRActiveStatus] = useState<'Active'|'Leave'|'Other'>('Active');
   const [rActiveReason, setRActiveReason] = useState(''); // Leave reason
   const [rEditingStaffId, setREditingStaffId] = useState<number | null>(null);
+  const [rStaffName, setRStaffName] = useState('');
+  const [rCvName, setRCvName] = useState('');
+  const [rCvDataUrl, setRCvDataUrl] = useState('');
 
   const resetFacilityForm = () => {
     setFName(''); setFType(facilityTypes[0]?.name || ''); setFState(''); setFDistrict(''); setFTownship(''); setFParent(undefined); setFQuotas({});
@@ -88,12 +119,44 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
     setActiveRecruit({facId, pos});
     setRDuty('main'); setRIsExternal(false); setRSourceFac(''); setRExtName(''); setRReason(''); setRConfirmOver(false);
     setRActiveStatus('Active'); setRActiveReason('');
+    setRStaffName(''); setRCvName(''); setRCvDataUrl('');
     setREditingStaffId(null);
+    setIsRecruitOpen(true);
+  }
+
+  const openEditStaff = (staff: typeof staffEntries[0], facId: number, pos: string) => {
+    setActiveRecruit({facId, pos});
+    if (staff.dutyStatus === 'Attached') {
+       setRDuty('attach');
+       if (staff.facilityId === -1) {
+         setRIsExternal(true);
+         setRSourceFac('');
+         setRExtName(staff.externalFacilityName || '');
+       } else {
+         setRIsExternal(false);
+         setRSourceFac(staff.facilityId.toString());
+         setRExtName('');
+       }
+    } else {
+       setRDuty('main');
+       setRIsExternal(false);
+       setRSourceFac('');
+       setRExtName('');
+    }
+    setRReason(staff.reason || '');
+    setRActiveStatus(staff.activeStatus || 'Active');
+    setRActiveReason(staff.activeReason || '');
+    setRStaffName(staff.name || '');
+    setRCvName(staff.cv || '');
+    setRCvDataUrl(staff.cvDataUrl || '');
+    setRConfirmOver(true); // Don't block editing
+    setREditingStaffId(staff.id);
     setIsRecruitOpen(true);
   }
 
   const submitRecruit = () => {
     if (!activeRecruit) return;
+    if (!rStaffName.trim()) return alert('ဝန်ထမ်းအမည် (Staff Name) ဖြည့်သွင်းပေးပါ။');
     if (rDuty === 'attach' && !rReason.trim()) return alert('အကြောင်းပြချက် (Reason for Attachment) ကို မဖြစ်မနေ ဖြည့်သွင်းပေးပါ။');
     if (rActiveStatus !== 'Active' && !rActiveReason.trim()) return alert('ဝန်ထမ်း ခွင့်/အခြားအခြေအနေအတွက် အကြောင်းပြချက်ကို ဖြည့်သွင်းရန် လိုအပ်ပါသည်။');
 
@@ -118,24 +181,29 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
       if (existing) {
         updateStaff({
           ...existing,
+          name: rStaffName,
           facilityId: homeFacId,
           currentFacilityId: destFacId,
           externalFacilityName: extName,
           dutyStatus,
           reason: rDuty === 'attach' ? rReason.trim() : '',
           activeStatus: rActiveStatus,
-          activeReason: rActiveStatus !== 'Active' ? rActiveReason.trim() : ''
+          activeReason: rActiveStatus !== 'Active' ? rActiveReason.trim() : '',
+          cv: rCvName,
+          cvDataUrl: rCvDataUrl
         });
       }
     } else {
       addStaff({
         id: Date.now(),
+        name: rStaffName,
         facilityId: homeFacId,
         currentFacilityId: destFacId,
         externalFacilityName: extName,
         position: activeRecruit.pos,
         reason: rDuty === 'attach' ? rReason.trim() : '',
-        cv: '', 
+        cv: rCvName, 
+        cvDataUrl: rCvDataUrl,
         dutyStatus,
         activeStatus: rActiveStatus,
         activeReason: rActiveStatus !== 'Active' ? rActiveReason.trim() : ''
@@ -190,6 +258,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
   const [expandedParents, setExpandedParents] = useState<Record<number, boolean>>({});
   const [expandedSubDepts, setExpandedSubDepts] = useState<Record<number, boolean>>({});
   const [expandedCards, setExpandedCards] = useState<Record<number, boolean>>({});
+  const [cardFilters, setCardFilters] = useState<Record<number, 'all'|'vacancy'|'attOut'|'attIn'>>({});
   const [showNoParentOnly, setShowNoParentOnly] = useState(false);
 
   const toggleLocation = (loc: string) => {
@@ -205,7 +274,23 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
   };
 
   const toggleCard = (id: number) => {
-    setExpandedCards(prev => ({ ...prev, [id]: !prev[id] }));
+    setExpandedCards(prev => {
+       const isExpanded = !prev[id];
+       if (!isExpanded) {
+          setCardFilters(fPrev => ({ ...fPrev, [id]: 'all' }));
+       } else {
+          setCardFilters(fPrev => ({ ...fPrev, [id]: 'all' }));
+       }
+       return { ...prev, [id]: isExpanded };
+    });
+  };
+
+  const setCardFilterAndExpand = (id: number, filter: 'all'|'vacancy'|'attOut'|'attIn') => {
+    setCardFilters(prev => {
+      const isSame = prev[id] === filter;
+      return { ...prev, [id]: isSame ? 'all' : filter };
+    });
+    setExpandedCards(prev => ({ ...prev, [id]: true }));
   };
 
   const renderFacilityCard = (f: Facility, depth = 0) => {
@@ -215,11 +300,11 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
     const childFacilities = allChildren.filter(c => !subDeptTypes.includes(c.type));
 
     const totalQuota = f.customQuotas.reduce((acc, q) => acc + q.max, 0);
-    const totalOccupied = staffEntries.filter(s => s.currentFacilityId === f.id).length;
+    const totalOccupied = staffEntries.filter(s => s.facilityId === f.id).length;
     
     // Aggregated stats for the right side of the card
     const totalVacancy = f.customQuotas.reduce((acc, q) => {
-      const occupied = staffEntries.filter(s => s.currentFacilityId === f.id && s.position === q.position).length;
+      const occupied = staffEntries.filter(s => s.facilityId === f.id && s.position === q.position).length;
       return acc + Math.max(0, q.max - occupied);
     }, 0);
     
@@ -237,49 +322,52 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
           layout
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className={`group bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden mb-3 ${isCardExpanded ? 'ring-2 ring-emerald-500/20' : ''}`}
+          className={`group bg-white ${depth > 0 ? 'rounded-xl mb-2' : 'rounded-2xl mb-3'} border border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden ${isCardExpanded ? 'ring-2 ring-emerald-500/20' : ''}`}
         >
-          <div className="flex flex-col md:flex-row items-stretch md:items-center p-4 md:p-6 gap-4 md:gap-6 min-h-[100px]">
+          <div className={`flex flex-col md:flex-row items-stretch md:items-center ${depth > 0 ? 'p-3 md:p-4 gap-3 md:gap-4' : 'p-5 md:p-7 gap-5 md:gap-7'} relative`}>
+             <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-emerald-400 to-emerald-600 hidden md:block" />
              {/* Left: Occupancy Badge & Title */}
-             <div className="flex-1 flex flex-col justify-center gap-3">
-                <div className={`w-fit px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${totalOccupied >= totalQuota && totalQuota > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                  {totalOccupied} / {totalQuota} OCCUPIED
+             <div className={`flex-1 flex flex-col justify-center ${depth > 0 ? 'gap-2' : 'gap-3'}`}>
+                <div className="flex items-center gap-2 mb-1">
+                   <div className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest ${totalOccupied >= totalQuota && totalQuota > 0 ? 'bg-emerald-100/80 text-emerald-700' : 'bg-amber-100/80 text-amber-700'}`}>
+                     {totalOccupied} / {totalQuota} OCCUPIED
+                   </div>
+                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none bg-slate-100 px-2.5 py-1 rounded">{f.type}</span>
+                   {f.status === 'Non-Functioning' && <span className="text-[10px] font-bold text-red-600 uppercase tracking-widest leading-none bg-red-50 border border-red-100 px-2.5 py-1 rounded">Non-Functioning</span>}
                 </div>
-                <div className="flex items-center gap-3">
-                   <h4 className="text-sm md:text-base font-black text-slate-800 font-display leading-snug">
+                
+                <div className="flex items-start gap-4">
+                   <h4 className={`${depth > 0 ? 'text-base md:text-lg' : 'text-lg md:text-xl'} font-black text-slate-900 font-display leading-snug`}>
                      {f.name}
                    </h4>
-                   <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                      <button onClick={() => toggleCard(f.id)} className={`p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 transition-all ${isCardExpanded ? 'rotate-90 text-emerald-500 bg-emerald-50' : ''}`}>
-                         <ChevronRight className="w-4 h-4" />
+                   <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5">
+                      <button onClick={() => toggleCard(f.id)} className={`p-2 rounded-xl border transition-all shadow-sm flex items-center justify-center ${isCardExpanded ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:border-slate-300'}`}>
+                         <span className="text-[10px] font-bold uppercase tracking-widest mr-1.5">{isCardExpanded ? 'Close' : 'Details'}</span>
+                         <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-300 ${isCardExpanded ? 'rotate-90' : ''}`} />
                       </button>
-                      {role !== 'viewer' && (
-                        <button onClick={() => openEditFacility(f)} className="p-1.5 rounded-lg hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-all">
+                      {canEditFacility(f.township) && (
+                        <button onClick={() => openEditFacility(f)} className="p-2 rounded-xl border bg-white border-slate-200 text-slate-500 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-600 transition-all shadow-sm">
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                       )}
                    </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">{f.type}</span>
-                   {f.status === 'Non-Functioning' && <span className="text-[9px] font-black text-red-500 uppercase tracking-widest leading-none">• Non-Functioning</span>}
-                </div>
              </div>
 
-             {/* Right: Stats Section */}
-             <div className="flex items-center gap-8 md:pl-8 md:border-l border-slate-100 shrink-0">
-                <div className="text-center">
-                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Vacancy</p>
-                   <p className={`text-xl font-black font-display ${totalVacancy > 0 ? 'text-slate-800' : 'text-slate-300'}`}>{totalVacancy}</p>
-                </div>
-                <div className="text-center">
-                   <p className="text-[9px] font-black text-blue-400 uppercase tracking-[0.2em] mb-1">Att Out</p>
-                   <p className={`text-xl font-black font-display ${totalAttOut > 0 ? 'text-blue-600' : 'text-slate-300'}`}>{totalAttOut}</p>
-                </div>
-                <div className="text-center">
-                   <p className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.2em] mb-1">Att In</p>
-                   <p className={`text-xl font-black font-display ${totalAttIn > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>{totalAttIn}</p>
-                </div>
+             {/* Right: Boxed Stats Section */}
+             <div className="grid grid-cols-3 gap-2 md:gap-3 shrink-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-100 md:ml-auto">
+                <button onClick={() => setCardFilterAndExpand(f.id, 'vacancy')} className={`bg-slate-50 border rounded-xl flex flex-col items-center justify-center transition-colors hover:bg-slate-100 ${cardFilters[f.id] === 'vacancy' ? 'ring-2 ring-red-400 border-red-200' : 'border-slate-100'} ${depth > 0 ? 'p-2 min-w-[60px]' : 'p-3 min-w-[80px]'}`}>
+                   <p className="text-[8px] md:text-[9px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Vacancy</p>
+                   <p className={`${depth > 0 ? 'text-lg' : 'text-xl'} font-black font-display leading-none ${totalVacancy > 0 ? 'text-red-500' : 'text-slate-400'}`}>{totalVacancy}</p>
+                </button>
+                <button onClick={() => setCardFilterAndExpand(f.id, 'attOut')} className={`bg-amber-50/50 border rounded-xl flex flex-col items-center justify-center transition-colors hover:bg-amber-50 ${cardFilters[f.id] === 'attOut' ? 'ring-2 ring-amber-400 border-amber-200' : 'border-amber-100/50'} ${depth > 0 ? 'p-2 min-w-[60px]' : 'p-3 min-w-[80px]'}`}>
+                   <p className="text-[8px] md:text-[9px] font-semibold text-amber-600/80 uppercase tracking-wider mb-1">Att Out</p>
+                   <p className={`${depth > 0 ? 'text-lg' : 'text-xl'} font-black font-display leading-none ${totalAttOut > 0 ? 'text-amber-600' : 'text-amber-300'}`}>{totalAttOut}</p>
+                </button>
+                <button onClick={() => setCardFilterAndExpand(f.id, 'attIn')} className={`bg-blue-50/50 border rounded-xl flex flex-col items-center justify-center transition-colors hover:bg-blue-50 ${cardFilters[f.id] === 'attIn' ? 'ring-2 ring-blue-400 border-blue-200' : 'border-blue-100/50'} ${depth > 0 ? 'p-2 min-w-[60px]' : 'p-3 min-w-[80px]'}`}>
+                   <p className="text-[8px] md:text-[9px] font-semibold text-blue-600/80 uppercase tracking-wider mb-1">Att In</p>
+                   <p className={`${depth > 0 ? 'text-lg' : 'text-xl'} font-black font-display leading-none ${totalAttIn > 0 ? 'text-blue-600' : 'text-blue-300'}`}>{totalAttIn}</p>
+                </button>
              </div>
           </div>
 
@@ -295,7 +383,21 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                   {f.customQuotas.length === 0 ? (
                     <p className="text-center text-xs text-slate-400 py-4 font-bold italic">No positions defined for this facility.</p>
                   ) : (
-                    f.customQuotas.map(q => {
+                    f.customQuotas.filter(q => {
+                      const filterMode = cardFilters[f.id] || 'all';
+                      if (filterMode === 'all') return true;
+                      const allowed = q.max || 0;
+                      const homeStaff = staffEntries.filter(s => s.facilityId === f.id && s.position === q.position);
+                      const occupied = homeStaff.length;
+                      const vacancy = Math.max(0, allowed - occupied);
+                      const attachedOut = homeStaff.filter(s => s.currentFacilityId !== f.id).length;
+                      const attachedIn = staffEntries.filter(s => s.currentFacilityId === f.id && s.facilityId !== f.id && s.position === q.position).length;
+                      
+                      if (filterMode === 'vacancy') return vacancy > 0;
+                      if (filterMode === 'attOut') return attachedOut > 0;
+                      if (filterMode === 'attIn') return attachedIn > 0;
+                      return true;
+                    }).map(q => {
                       const allowed = q.max || 0;
                       const homeStaff = staffEntries.filter(s => s.facilityId === f.id && s.position === q.position);
                       const occupied = homeStaff.length;
@@ -308,29 +410,97 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                         <div key={q.position} className={`p-4 bg-white border rounded-xl flex flex-col gap-3 transition-shadow hover:shadow-sm ${isOver ? 'border-red-200' : 'border-slate-100'}`}>
                           <div className="flex items-center justify-between">
                              <span className="text-xs font-black text-slate-700 font-display">{q.position}</span>
-                             <button onClick={() => openRecruit(f.id, q.position)} className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 transition-all flex items-center gap-1.5 leading-none">
-                               <Plus className="w-3 h-3" /> Recruit
-                             </button>
+                             {canEditFacility(f.township) && (
+                               <button onClick={() => openRecruit(f.id, q.position)} className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 transition-all flex items-center gap-1.5 leading-none">
+                                 <Plus className="w-3 h-3" /> Recruit
+                               </button>
+                             )}
                           </div>
                           
-                          <div className="grid grid-cols-4 gap-4">
-                            <div>
-                               <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">Vacant</p>
-                               <span className={`text-sm font-black ${vacancy > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>{vacancy}</span>
+                          <div className="grid grid-cols-4 gap-3 bg-slate-50/50 p-3 rounded-lg border border-slate-100/50">
+                            <div className="bg-white p-2 border border-slate-100 rounded flex flex-col items-center justify-center shadow-sm">
+                               <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 leading-none">Vacant</p>
+                               <span className={`text-base font-black ${vacancy > 0 ? 'text-red-500' : 'text-slate-300'}`}>{vacancy}</span>
                             </div>
-                            <div>
-                               <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">Occupied</p>
-                               <span className="text-sm font-black text-slate-800">{occupied} / {allowed}</span>
+                            <div className="bg-emerald-50 border border-emerald-100 p-2 rounded flex flex-col items-center justify-center shadow-sm">
+                               <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1 leading-none">Occupied</p>
+                               <span className="text-base font-black text-emerald-700">{occupied} <span className="text-emerald-400 text-xs">/ {allowed}</span></span>
                             </div>
-                            <div>
-                               <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">Att Out</p>
-                               <span className={`text-sm font-black ${attachedOut > 0 ? 'text-blue-600' : 'text-slate-300'}`}>{attachedOut}</span>
+                            <div className="bg-amber-50 border border-amber-100 p-2 rounded flex flex-col items-center justify-center shadow-sm">
+                               <p className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-1 leading-none">Att Out</p>
+                               <span className={`text-base font-black ${attachedOut > 0 ? 'text-amber-600' : 'text-amber-300'}`}>{attachedOut}</span>
                             </div>
-                            <div>
-                               <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">Att In</p>
-                               <span className={`text-sm font-black ${attachedIn > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>{attachedIn}</span>
+                            <div className="bg-blue-50 border border-blue-100 p-2 rounded flex flex-col items-center justify-center shadow-sm">
+                               <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1 leading-none">Att In</p>
+                               <span className={`text-base font-black ${attachedIn > 0 ? 'text-blue-600' : 'text-blue-300'}`}>{attachedIn}</span>
                             </div>
                           </div>
+
+                          {/* List of related staff */}
+                          {(homeStaff.length > 0 || attachedIn > 0) && (
+                            <div className="space-y-2 mt-1">
+                              {staffEntries.filter(s => {
+                                 if (!((s.facilityId === f.id || s.currentFacilityId === f.id) && s.position === q.position)) return false;
+                                 const filterMode = cardFilters[f.id] || 'all';
+                                 if (filterMode === 'all' || filterMode === 'vacancy') return true;
+                                 
+                                 const isAttOut = s.facilityId === f.id && s.currentFacilityId !== f.id;
+                                 const isAttIn = s.facilityId !== f.id && s.currentFacilityId === f.id;
+                                 
+                                 if (filterMode === 'attOut') return isAttOut;
+                                 if (filterMode === 'attIn') return isAttIn;
+                                 
+                                 return true;
+                              }).map((staff, idx) => {
+                                const isPerm = staff.facilityId === f.id && staff.currentFacilityId === f.id;
+                                const isAttOut = staff.facilityId === f.id && staff.currentFacilityId !== f.id;
+                                const isAttIn = staff.facilityId !== f.id && staff.currentFacilityId === f.id;
+                                
+                                let statusColor = "bg-slate-100 text-slate-600";
+                                let statusText = "Unknown";
+                                if (isPerm) { statusColor = "bg-emerald-50 text-emerald-600 border border-emerald-100"; statusText = "Permanent"; }
+                                if (isAttOut) { statusColor = "bg-amber-50 text-amber-600 border border-amber-100"; statusText = "Attached Out"; }
+                                if (isAttIn) { statusColor = "bg-blue-50 text-blue-600 border border-blue-100"; statusText = "Attached In"; }
+
+                                const actStatus = staff.activeStatus || 'Active';
+                                const actReason = staff.activeReason || '';
+
+                                return (
+                                  <div key={staff.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-white border border-slate-100 hover:border-slate-300 rounded-lg shadow-sm transition-all gap-3">
+                                    <div className="flex flex-col gap-1.5">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-sm font-bold text-slate-700">{staff.name || `Staff #${idx + 1}`}</span>
+                                        <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${statusColor}`}>{statusText}</span>
+                                        <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${actStatus === 'Active' ? 'bg-emerald-100 text-emerald-700' : actStatus === 'Leave' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                                          {actStatus} {actReason && actStatus !== 'Active' && `(${actReason})`}
+                                        </span>
+                                      </div>
+                                      {(isAttOut || isAttIn) && staff.reason && (
+                                        <p className="text-xs text-slate-500 font-medium">
+                                          Reason: <span className="italic">{staff.reason}</span> 
+                                          {isAttOut && staff.currentFacilityId !== -1 && ` (at ${facilities.find(ff=>ff.id===staff.currentFacilityId)?.name || 'Unknown'})`}
+                                          {isAttIn && staff.facilityId !== -1 && ` (from ${facilities.find(ff=>ff.id===staff.facilityId)?.name || 'Unknown'})`}
+                                          {isAttIn && staff.facilityId === -1 && ` (from ${staff.externalFacilityName})`}
+                                        </p>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      {staff.cvDataUrl && (
+                                        <button onClick={() => setCvPreview({ name: staff.cv || `CV_${staff.id}`, dataUrl: staff.cvDataUrl! })} className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-md text-[11px] font-bold transition-colors flex items-center gap-1.5">
+                                          <FileText className="w-3 h-3" /> View CV
+                                        </button>
+                                      )}
+                                      {canEditFacility(f.township) && (
+                                        <button onClick={() => openEditStaff(staff, f.id, q.position)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[11px] font-bold transition-colors flex items-center gap-1.5">
+                                          <Edit2 className="w-3 h-3" /> Edit
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       );
                     })
@@ -343,7 +513,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
 
         {/* Child Containers */}
         {(subDepartments.length > 0 || childFacilities.length > 0) && !showNoParentOnly && (
-          <div className="ml-8 border-l-2 border-slate-100 pl-4 space-y-2 mb-4">
+          <div className="ml-2 sm:ml-4 border-l-2 border-slate-100 pl-2 sm:pl-4 space-y-2 mb-3">
             {subDepartments.length > 0 && (
               <div className="flex flex-col">
                  <button onClick={() => toggleSubDepts(f.id)} className="w-fit text-[10px] font-black text-blue-500/60 uppercase tracking-widest py-1 px-2 flex items-center gap-2 hover:text-blue-600 transition-colors">
@@ -401,8 +571,8 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
           >
             <Filter className="w-4 h-4" /> {showNoParentOnly ? 'ပင်မဌာနများသာ' : 'ပင်မဌာနများသာ ပြမည်'}
           </button>
-          {role !== 'viewer' && (
-            <button onClick={() => { handleFacTypeChange(fType); setIsAddOpen(true); }} className="bg-emerald-600 text-white px-6 py-3 rounded-xl text-[13px] font-bold hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 active:scale-95 shrink-0">
+          {canEditFacility() && (
+            <button onClick={openAddFacility} className="bg-emerald-600 text-white px-6 py-3 rounded-xl text-[13px] font-bold hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 active:scale-95 shrink-0">
               <Plus className="w-4 h-4" /> ဌာနအသစ် ထည့်သွင်းရန်
             </button>
           )}
@@ -475,7 +645,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                     setFState(e.target.value);
                     setFDistrict('');
                     setFTownship('');
-                  }} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500">
+                  }} disabled={role === 'manager' && !!allowedTownship} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500 disabled:opacity-50 disabled:bg-slate-50">
                     <option value="">ရွေးချယ်ပါ...</option>
                     {state.locations.map(r => <option key={r.name} value={r.name}>{r.name}</option>)}
                   </select>
@@ -485,7 +655,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                   <select value={fDistrict} onChange={e=>{
                     setFDistrict(e.target.value);
                     setFTownship('');
-                  }} disabled={!fState} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500 disabled:opacity-50 disabled:bg-slate-50">
+                  }} disabled={!fState || (role === 'manager' && !!allowedTownship)} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500 disabled:opacity-50 disabled:bg-slate-50">
                     <option value="">ရွေးချယ်ပါ...</option>
                     {fState && state.locations.find(r => r.name === fState)?.districts.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
                   </select>
@@ -494,7 +664,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-slate-500 font-medium mb-1">မြို့နယ်</label>
-                  <select value={fTownship} onChange={e=>setFTownship(e.target.value)} disabled={!fDistrict} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500 disabled:opacity-50 disabled:bg-slate-50">
+                  <select value={fTownship} onChange={e=>setFTownship(e.target.value)} disabled={!fDistrict || (role === 'manager' && !!allowedTownship)} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500 disabled:opacity-50 disabled:bg-slate-50">
                     <option value="">ရွေးချယ်ပါ...</option>
                     {fDistrict && state.locations.find(r => r.name === fState)?.districts.find(d => d.name === fDistrict)?.townships.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
@@ -730,6 +900,11 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
 
             <div className="space-y-4 text-sm">
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">ဝန်ထမ်းအမည် (Staff Name) <span className="text-red-500">*</span></label>
+                <input type="text" value={rStaffName} onChange={e=>setRStaffName(e.target.value)} placeholder="ဥပမာ - ဒေါက်တာအောင်အောင်" className="w-full p-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-emerald-500 bg-white" />
+              </div>
+
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                 <label className="block text-xs font-semibold text-slate-600 mb-2">တာဝန်ထမ်းဆောင်မည့် ပုံစံ (Duty Type) <span className="text-red-500">*</span></label>
                 <div className="flex flex-col gap-2">
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -797,6 +972,35 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                     <input type="text" placeholder="ဥပမာ - ကျန်းမာရေးခွင့်၊ သင်တန်း..." value={rActiveReason} onChange={e=>setRActiveReason(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-500 bg-white" />
                   </div>
                 )}
+              </div>
+
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <label className="block text-xs font-semibold text-slate-600 mb-2">ဝန်ထမ်းကိုယ်ရေးရာဇဝင် (CV Attachment)</label>
+                <div className="flex items-center gap-3">
+                  <label className="flex-1 cursor-pointer bg-white border border-slate-200 hover:border-emerald-500 rounded-lg p-2.5 flex items-center justify-center gap-2 transition-colors">
+                    <FileText className="w-4 h-4 text-emerald-600" />
+                    <span className="text-sm font-medium text-slate-600 truncate">{rCvName || 'Upload PDF/Image'}</span>
+                    <input 
+                      type="file" 
+                      accept="image/*,application/pdf"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setRCvName(file.name);
+                          const reader = new FileReader();
+                          reader.onload = (e) => setRCvDataUrl(e.target?.result as string);
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                      className="hidden" 
+                    />
+                  </label>
+                  {rCvDataUrl && (
+                    <button onClick={() => { setRCvName(''); setRCvDataUrl(''); }} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 

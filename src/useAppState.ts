@@ -210,9 +210,15 @@ export function useAppState() {
   const deleteFacility = async (id: number) => {
     try {
       await deleteDoc(doc(db, 'facilities', String(id)));
-      const staffToDelete = staffEntries.filter(s => s.facilityId === id || s.currentFacilityId === id);
-      for (const s of staffToDelete) {
-        await deleteDoc(doc(db, 'staff', String(s.id)));
+      for (const s of staffEntries) {
+        if (s.facilityId === id) {
+          // Home base deleted, so delete the staff
+          await deleteDoc(doc(db, 'staff', String(s.id)));
+        } else if (s.currentFacilityId === id) {
+          // Attached to this facility, return them to home base
+          const updated = { ...s, currentFacilityId: s.facilityId, dutyStatus: 'Present', reason: '', externalFacilityName: '' } as Staff;
+          await setDoc(doc(db, 'staff', String(s.id)), sanitizeForFirestore(updated));
+        }
       }
     } catch (e) { handleFirestoreError(e, OperationType.DELETE, 'facilities'); }
   };
