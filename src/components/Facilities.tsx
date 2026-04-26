@@ -794,8 +794,10 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                       className="w-20 p-1.5 border border-slate-200 rounded text-center focus:border-emerald-500 outline-none" min="0" 
                     />
                     <button onClick={() => {
-                      const newFac = { ...activeFacility, customQuotas: activeFacility.customQuotas.filter((_, i) => i !== idx) };
-                      setActiveFacility(newFac);
+                      safeDelete(() => {
+                        const newFac = { ...activeFacility, customQuotas: activeFacility.customQuotas.filter((_, i) => i !== idx) };
+                        setActiveFacility(newFac);
+                      }, 'ဤရာထူးသတ်မှတ်ချက်ကို ဖြုတ်ပစ်မည်မှာ သေချာပါသလား?');
                     }} className="text-slate-300 hover:text-red-500 transition"><Trash2 className="w-4 h-4" /></button>
                   </div>
                 </div>

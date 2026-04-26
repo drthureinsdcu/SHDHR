@@ -834,14 +834,15 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
                             <td className="px-6 py-4 text-right">
                                <button 
                                  onClick={async () => {
-                                   if (!confirm('Are you sure you want to delete this user profile? Note: This does not delete their Google/Firebase Auth account.')) return;
-                                   const { deleteDoc } = await import('firebase/firestore');
-                                   try {
-                                     await deleteDoc(doc(db, 'users', u.id));
-                                     setDbUsers(prev => prev.filter(x => x.id !== u.id));
-                                   } catch(e) {
-                                     alert('Error deleting user');
-                                   }
+                                   safeDelete(async () => {
+                                     const { deleteDoc } = await import('firebase/firestore');
+                                     try {
+                                       await deleteDoc(doc(db, 'users', u.id));
+                                       setDbUsers(prev => prev.filter(x => x.id !== u.id));
+                                     } catch(e) {
+                                       alert('Error deleting user');
+                                     }
+                                   }, 'Are you sure you want to delete this user profile? Note: This does not delete their Google/Firebase Auth account.');
                                  }} 
                                  className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
                                >
@@ -895,7 +896,7 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
                                     
                                     if (isP1Prefixed && !isP2Prefixed) {
                                       // Merge pos2 into pos1
-                                      if (confirm(`'${o.pos2}' အချက်အလက်အားလုံးကို '${o.pos1}' သို့ ပြောင်းလဲပေါင်းစပ်မည်မှာ သေချာပါသလား?`)) {
+                                      safeDelete(async () => {
                                         setPosEditOrig(o.pos2);
                                         setPosEditVal(o.pos1.replace(/^(ကုသ|ပက) - /, ''));
                                         setPosEditCat(o.pos1.startsWith('ကုသ') ? 'ကုသ' : 'ပက');
@@ -928,10 +929,10 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
                                         for (const s of affectedStaff) {
                                           await state.updateStaff({ ...s, position: finalName });
                                         }
-                                      }
+                                      }, `'${o.pos2}' အချက်အလက်အားလုံးကို '${o.pos1}' သို့ ပြောင်းလဲပေါင်းစပ်မည်မှာ သေချာပါသလား?`);
                                     } else if (isP2Prefixed && !isP1Prefixed) {
                                       // Merge pos1 into pos2
-                                      if (confirm(`'${o.pos1}' အချက်အလက်အားလုံးကို '${o.pos2}' သို့ ပြောင်းလဲပေါင်းစပ်မည်မှာ သေချာပါသလား?`)) {
+                                      safeDelete(async () => {
                                         const finalName = o.pos2;
                                         const oldName = o.pos1;
                                         
@@ -960,7 +961,7 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
                                         for (const s of affectedStaff) {
                                           await state.updateStaff({ ...s, position: finalName });
                                         }
-                                      }
+                                      }, `'${o.pos1}' အချက်အလက်အားလုံးကို '${o.pos2}' သို့ ပြောင်းလဲပေါင်းစပ်မည်မှာ သေချာပါသလား?`);
                                     }
                                   }}
                                   className="ml-auto px-4 py-1.5 bg-orange-600 text-white rounded-lg text-[10px] font-black uppercase hover:bg-orange-700 transition shadow-sm active:scale-95"
@@ -1085,8 +1086,10 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
                   <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl group/sub">
                     <span className="font-bold text-slate-700 text-sm">{sub}</span>
                     <button onClick={() => {
-                      const updated = (state.subdepartmentsMap[manageSubDept] || []).filter((_, i) => i !== idx);
-                      state.updateSubdepartmentsMap({ ...state.subdepartmentsMap, [manageSubDept]: updated });
+                      safeDelete(() => {
+                        const updated = (state.subdepartmentsMap[manageSubDept] || []).filter((_, i) => i !== idx);
+                        state.updateSubdepartmentsMap({ ...state.subdepartmentsMap, [manageSubDept]: updated });
+                      }, `ဌာနခွဲ '${sub}' ကို ဖျက်ပစ်မည်မှာ သေချာပါသလား?`);
                     }} className="text-slate-300 hover:text-red-500 p-1 rounded-md opacity-0 group-hover/sub:opacity-100 transition">
                       <Trash2 className="w-4 h-4" />
                     </button>
