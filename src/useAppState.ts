@@ -1,11 +1,21 @@
 import { useState, useEffect, Dispatch, SetStateAction } from 'react';
-import { AppState, Facility, Quota, Staff, RegionData } from './types';
+import { AppState, Facility, Quota, Staff, RegionData, Position, FacilityType } from './types';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 
-const defaultFacilityTypes = ["Central", "District", "Hospital", "RHC", "Sub-RHC"];
-const defaultPositionsList = ["Medical Officer", "Health Assistant", "Midwife"];
+const defaultFacilityTypes: FacilityType[] = [
+  { name: "Central", category: "Public Health" },
+  { name: "District", category: "Public Health" },
+  { name: "Hospital", category: "Clinical" },
+  { name: "RHC", category: "Public Health" },
+  { name: "Sub-RHC", category: "Public Health" }
+];
+const defaultPositionsList: Position[] = [
+  { name: "Medical Officer", rank: 1, category: "Clinical" },
+  { name: "Health Assistant", rank: 2, category: "Public Health" },
+  { name: "Midwife", rank: 3, category: "Public Health" }
+];
 
 enum OperationType {
   CREATE = 'create',
@@ -38,11 +48,21 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
+function sanitizeForFirestore(obj: any) {
+  const sanitized = { ...obj };
+  Object.keys(sanitized).forEach(key => {
+    if (sanitized[key] === undefined) {
+      delete sanitized[key];
+    }
+  });
+  return sanitized;
+}
+
 export function useAppState() {
   const [user, setUser] = useState<User | null>(null);
   const [language, setLanguageState] = useState<'en' | 'my'>('en');
-  const [facilityTypes, setFacilityTypes] = useState<string[]>([]);
-  const [positionsList, setPositionsList] = useState<string[]>([]);
+  const [facilityTypes, setFacilityTypes] = useState<FacilityType[]>([]);
+  const [positionsList, setPositionsList] = useState<Position[]>([]);
   const [globalDefaultQuotas, setGlobalDefaultQuotas] = useState<Quota[]>([]);
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [staffEntries, setStaffEntries] = useState<Staff[]>([]);
@@ -72,11 +92,25 @@ export function useAppState() {
 
     // Setup Firestore listeners
     const unsubFacilities = onSnapshot(collection(db, 'facilities'), (snap) => {
-      setFacilities(snap.docs.map(d => ({ ...d.data(), id: Number(d.id) } as Facility)));
+      setFacilities(snap.docs.map(d => {
+        const data = d.data();
+        return {
+          ...data,
+          id: Number(d.id),
+          type: typeof data.type === 'object' ? data.type.name : data.type
+        } as Facility;
+      }));
     }, (error) => handleFirestoreError(error, OperationType.GET, 'facilities'));
 
     const unsubStaff = onSnapshot(collection(db, 'staff'), (snap) => {
-      setStaffEntries(snap.docs.map(d => ({ ...d.data(), id: Number(d.id) } as Staff)));
+      setStaffEntries(snap.docs.map(d => {
+        const data = d.data();
+        return {
+          ...data,
+          id: Number(d.id),
+          position: typeof data.position === 'object' ? data.position.name : data.position
+        } as Staff;
+      }));
     }, (error) => handleFirestoreError(error, OperationType.GET, 'staff'));
 
     const unsubQuotas = onSnapshot(collection(db, 'quotas'), (snap) => {
@@ -86,8 +120,20 @@ export function useAppState() {
     const unsubSettings = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        if (data.facilityTypes) setFacilityTypes(data.facilityTypes);
-        if (data.positionsList) setPositionsList(data.positionsList);
+        if (data.facilityTypes) {
+           const formattedFac = data.facilityTypes.map((f: any) => typeof f === 'string' ? { name: f, category: 'Public Health' } : f);
+           setFacilityTypes(formattedFac);
+        }
+        if (data.positionsList) {
+          const formatted = data.positionsList.map((p: any) => {
+            if (typeof p === 'string') return { name: p, rank: 99, category: 'Public Health' };
+            return {
+              ...p,
+              category: p.category || (p.name.startsWith('ပက') ? 'Public Health' : 'Clinical')
+            };
+          });
+          setPositionsList(formatted);
+        }
         if (data.locations) setLocations(data.locations);
         if (data.subdepartmentsMap) setSubdepartmentsMap(data.subdepartmentsMap);
       } else {
@@ -107,26 +153,30 @@ export function useAppState() {
 
   const updateSettingsItem = async (updates: any) => {
     try {
-      await setDoc(doc(db, 'settings', 'general'), updates, { merge: true });
+      await setDoc(doc(db, 'settings', 'general'), sanitizeForFirestore(updates), { merge: true });
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, 'settings/general');
     }
   };
 
-  const addFacilityType = (type: string) => {
-    if (!facilityTypes.includes(type)) {
-      updateSettingsItem({ facilityTypes: [...facilityTypes, type] });
+  const addFacilityType = (name: string) => {
+    if (!facilityTypes.find(f => f.name === name)) {
+      updateSettingsItem({ facilityTypes: [...facilityTypes, { name, category: 'Public Health' }] });
     }
   };
 
-  const deleteFacilityType = (idx: number) => {
-    const newTypes = facilityTypes.filter((_, i) => i !== idx);
+  const deleteFacilityType = (name: string) => {
+    const newTypes = facilityTypes.filter((f) => f.name !== name);
     updateSettingsItem({ facilityTypes: newTypes });
   };
 
-  const addQuota = async (newQuota: Quota & { isNewPosition?: boolean; newPosName?: string }) => {
-    if (newQuota.isNewPosition && newQuota.newPosName && !positionsList.includes(newQuota.newPosName)) {
-      await updateSettingsItem({ positionsList: [...positionsList, newQuota.newPosName] });
+  const updateFacilityTypes = (newList: FacilityType[]) => {
+    updateSettingsItem({ facilityTypes: newList });
+  };
+
+  const addQuota = async (newQuota: Quota & { isNewPosition?: boolean; newPosName?: string; newPosCat?: 'Public Health' | 'Clinical' }) => {
+    if (newQuota.isNewPosition && newQuota.newPosName && !positionsList.find(p => p.name === newQuota.newPosName)) {
+      await updateSettingsItem({ positionsList: [...positionsList, { name: newQuota.newPosName, rank: 99, category: newQuota.newPosCat || 'Public Health' }] });
     }
     const finalQuota = {
       id: newQuota.id,
@@ -135,7 +185,7 @@ export function useAppState() {
       max: newQuota.max
     };
     try {
-      await setDoc(doc(db, 'quotas', String(finalQuota.id)), finalQuota);
+      await setDoc(doc(db, 'quotas', String(finalQuota.id)), sanitizeForFirestore(finalQuota));
     } catch (e) { handleFirestoreError(e, OperationType.WRITE, 'quotas'); }
   };
 
@@ -147,13 +197,13 @@ export function useAppState() {
 
   const addFacility = async (fac: Facility) => {
     try {
-      await setDoc(doc(db, 'facilities', String(fac.id)), fac);
+      await setDoc(doc(db, 'facilities', String(fac.id)), sanitizeForFirestore(fac));
     } catch (e) { handleFirestoreError(e, OperationType.WRITE, 'facilities'); }
   };
 
   const updateFacility = async (updatedFac: Facility) => {
     try {
-      await setDoc(doc(db, 'facilities', String(updatedFac.id)), updatedFac);
+      await setDoc(doc(db, 'facilities', String(updatedFac.id)), sanitizeForFirestore(updatedFac));
     } catch (e) { handleFirestoreError(e, OperationType.WRITE, 'facilities'); }
   };
 
@@ -169,7 +219,7 @@ export function useAppState() {
 
   const addStaff = async (staff: Staff) => {
     try {
-      await setDoc(doc(db, 'staff', String(staff.id)), staff);
+      await setDoc(doc(db, 'staff', String(staff.id)), sanitizeForFirestore(staff));
     } catch (e) { handleFirestoreError(e, OperationType.WRITE, 'staff'); }
   };
 
@@ -181,12 +231,16 @@ export function useAppState() {
 
   const updateStaff = async (updatedStaff: Staff) => {
     try {
-      await setDoc(doc(db, 'staff', String(updatedStaff.id)), updatedStaff);
+      await setDoc(doc(db, 'staff', String(updatedStaff.id)), sanitizeForFirestore(updatedStaff));
     } catch (e) { handleFirestoreError(e, OperationType.WRITE, 'staff'); }
   };
 
   const updateLocations = (newLocs: RegionData[]) => {
     updateSettingsItem({ locations: newLocs });
+  };
+
+  const updatePositionsList = (newList: Position[]) => {
+    updateSettingsItem({ positionsList: newList });
   };
 
   const updateSubdepartmentsMap = (newMap: Record<string, string[]>) => {
@@ -202,12 +256,13 @@ export function useAppState() {
     isLoaded,
     user,
     language, setLanguage,
-    facilityTypes, addFacilityType, deleteFacilityType,
+    facilityTypes, addFacilityType, deleteFacilityType, updateFacilityTypes,
     positionsList,
     globalDefaultQuotas, addQuota, deleteQuota,
     facilities, addFacility, updateFacility, deleteFacility,
     staffEntries, addStaff, updateStaff, deleteStaff,
     locations, updateLocations,
     subdepartmentsMap, updateSubdepartmentsMap,
+    updatePositionsList
   };
 }

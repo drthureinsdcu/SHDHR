@@ -30,7 +30,11 @@ export const RoleProvider: React.FC<{ children: React.ReactNode }> = ({ children
              setRole(userDoc.data().role as Role || 'viewer');
           } else {
              // Create default viewer record
-             await setDoc(userDocRef, { role: 'viewer', email: user.email, name: user.displayName });
+             await setDoc(userDocRef, { 
+               role: 'viewer', 
+               email: user.email || null, 
+               name: user.displayName || null 
+             });
              setRole('viewer');
           }
         } catch (e) {

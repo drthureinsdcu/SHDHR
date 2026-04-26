@@ -1,7 +1,8 @@
 import React from 'react';
-import { Building2, UserCheck, UsersRound, TriangleAlert, ArrowRight, User, UserX, UserMinus, Percent, HeartPulse, ShieldAlert, PieChart, MapPin, TrendingUp, AlertCircle, Clock, MoveUp } from 'lucide-react';
+import { Building2, UserCheck, UsersRound, TriangleAlert, ArrowRight, User, UserX, UserMinus, Percent, HeartPulse, ShieldAlert, PieChart, MapPin, TrendingUp, AlertCircle, Clock, MoveUp, ChevronDown } from 'lucide-react';
 import { motion } from 'motion/react';
 import OrganizationChart from './OrganizationChart';
+import { Facility } from '../types';
 
 export default function Dashboard({ state }: { state: ReturnType<typeof import('../useAppState').useAppState> }) {
   const { facilities, staffEntries } = state;
@@ -103,6 +104,34 @@ export default function Dashboard({ state }: { state: ReturnType<typeof import('
   const item = {
     hidden: { opacity: 0, y: 20 },
     show: { opacity: 1, y: 0 }
+  };
+
+  const [selectedPositions, setSelectedPositions] = React.useState<string[]>([]);
+  const [searchResults, setSearchResults] = React.useState<{ facility: Facility; position: string; vacant: number }[]>([]);
+  const [isSearching, setIsSearching] = React.useState(false);
+  const [isDesignationDropdownOpen, setIsDesignationDropdownOpen] = React.useState(false);
+
+  const togglePosition = (pos: string) => {
+    setSelectedPositions(prev => 
+      prev.includes(pos) ? prev.filter(p => p !== pos) : [...prev, pos]
+    );
+  };
+
+  const handleSearch = () => {
+    const results: { facility: Facility; position: string; vacant: number }[] = [];
+    facilities.forEach(f => {
+      (f.customQuotas || []).forEach(q => {
+        if (selectedPositions.includes(q.position)) {
+          const occupied = staffEntries.filter(s => s.currentFacilityId === f.id && s.position === q.position).length;
+          const vacant = q.max - occupied;
+          if (vacant > 0) {
+            results.push({ facility: f, position: q.position, vacant });
+          }
+        }
+      });
+    });
+    setSearchResults(results.sort((a,b) => b.vacant - a.vacant));
+    setIsSearching(true);
   };
 
   return (
@@ -213,6 +242,131 @@ export default function Dashboard({ state }: { state: ReturnType<typeof import('
             <span className="text-[11px] font-bold text-slate-300">PERSONNEL</span>
           </div>
         </motion.div>
+      </motion.div>
+
+      {/* VACANCY FINDER SECTION */}
+      <motion.div 
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+        className="glass-card rounded-[2.5rem] border border-slate-200/60 p-8 shadow-sm bg-white/50"
+      >
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+           <div className="flex items-center gap-4">
+             <div className="w-14 h-14 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600 shadow-inner">
+               <ShieldAlert className="w-7 h-7" />
+             </div>
+             <div>
+               <h3 className="text-2xl font-black text-slate-900 font-display">လစ်လပ်ရာထူး ရှာဖွေရေး (Vacancy Finder)</h3>
+               <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mt-1">Search for vacant positions across the system</p>
+             </div>
+           </div>
+           <button 
+             onClick={handleSearch}
+             disabled={selectedPositions.length === 0}
+             className="px-8 py-3 bg-slate-900 text-white rounded-2xl text-sm font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-xl shadow-slate-200 disabled:opacity-30 disabled:cursor-not-allowed active:scale-95"
+           >
+             ရှာဖွေမည် (Search)
+           </button>
+        </div>
+
+        <div className="space-y-4">
+           <div className="flex items-center justify-between px-2">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Designations to check</span>
+              <button onClick={() => setSelectedPositions([])} className="text-[10px] font-black text-red-500 uppercase tracking-widest hover:underline">Clear All</button>
+           </div>
+           
+           <div className="relative">
+             <button
+               onClick={() => setIsDesignationDropdownOpen(!isDesignationDropdownOpen)}
+               className="w-full flex items-center justify-between bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-700 shadow-sm hover:border-emerald-300 transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+             >
+               <span className="truncate">
+                 {selectedPositions.length === 0 ? 'Select designations...' : `${selectedPositions.length} designation(s) selected`}
+               </span>
+               <ChevronDown className="w-4 h-4 text-slate-400" />
+             </button>
+
+             {isDesignationDropdownOpen && (
+               <>
+                 <div className="fixed inset-0 z-10" onClick={() => setIsDesignationDropdownOpen(false)} />
+                 <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-xl z-20 max-h-80 overflow-y-auto p-2">
+                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                     {[...(state.positionsList || [])].sort((a,b) => ((a.rank ?? 99) - (b.rank ?? 99)) || a.name.localeCompare(b.name)).map(pos => (
+                       <button
+                         key={pos.name}
+                         onClick={() => togglePosition(pos.name)}
+                         className={`w-full px-3 py-2.5 rounded-lg text-[12px] font-bold transition-all text-left flex items-center gap-2 ${selectedPositions.includes(pos.name) ? 'bg-emerald-50 text-emerald-700' : 'hover:bg-slate-50 text-slate-600'}`}
+                       >
+                         <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${selectedPositions.includes(pos.name) ? 'bg-emerald-600 border-emerald-600' : 'border-slate-300 bg-white'}`}>
+                           {selectedPositions.includes(pos.name) && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                         </div>
+                         <span className="truncate">{pos.name}</span>
+                       </button>
+                     ))}
+                   </div>
+                 </div>
+               </>
+             )}
+           </div>
+        </div>
+
+        {isSearching && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="mt-12 bg-slate-50/50 rounded-[2rem] border border-slate-200/60 overflow-hidden"
+          >
+            <div className="px-6 py-4 bg-white border-b border-slate-100 flex items-center justify-between">
+              <h4 className="text-sm font-black text-slate-800 uppercase tracking-widest">Search Results ({searchResults.length})</h4>
+              <span className="text-[10px] font-bold text-slate-400 italic">Showing all facilities with vacancies for selected roles</span>
+            </div>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                  <tr>
+                    <th className="px-6 py-4">Facility Name</th>
+                    <th className="px-6 py-4">Type</th>
+                    <th className="px-6 py-4">Location</th>
+                    <th className="px-6 py-4 text-center">Designation</th>
+                    <th className="px-6 py-4 text-center">Vacancies</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-display">
+                  {searchResults.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-12 text-center text-slate-400 font-bold italic">No vacancies found for the selected positions.</td>
+                    </tr>
+                  ) : (
+                    searchResults.map((res, i) => (
+                      <tr key={`${res.facility.id}-${res.position}`} className="hover:bg-white transition-colors group">
+                        <td className="px-6 py-5 font-black text-slate-800 text-sm">{res.facility.name}</td>
+                        <td className="px-6 py-5">
+                           <span className="text-[10px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded border border-slate-100 group-hover:bg-white">{res.facility.type}</span>
+                        </td>
+                        <td className="px-6 py-5">
+                          <span className="text-xs text-slate-500 font-bold flex items-center gap-1.5 leading-none">
+                            <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                            {[res.facility.township, res.facility.state].filter(Boolean).join(', ')}
+                          </span>
+                        </td>
+                        <td className="px-6 py-5 text-center">
+                          <span className="text-xs font-black text-blue-600">{res.position}</span>
+                        </td>
+                        <td className="px-6 py-5 text-center">
+                          <span className="bg-white px-3 py-1 rounded-lg border border-slate-200 text-red-600 font-black shadow-sm group-hover:border-red-200">
+                             {res.vacant}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </motion.div>
+        )}
       </motion.div>
 
       <motion.div 

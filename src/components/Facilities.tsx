@@ -17,7 +17,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
 
   // Facility Form State
   const [fName, setFName] = useState('');
-  const [fType, setFType] = useState(facilityTypes[0] || '');
+  const [fType, setFType] = useState(facilityTypes[0]?.name || '');
   const [fState, setFState] = useState('');
   const [fDistrict, setFDistrict] = useState('');
   const [fTownship, setFTownship] = useState('');
@@ -48,7 +48,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
   const [rEditingStaffId, setREditingStaffId] = useState<number | null>(null);
 
   const resetFacilityForm = () => {
-    setFName(''); setFType(facilityTypes[0] || ''); setFState(''); setFDistrict(''); setFTownship(''); setFParent(undefined); setFQuotas({});
+    setFName(''); setFType(facilityTypes[0]?.name || ''); setFState(''); setFDistrict(''); setFTownship(''); setFParent(undefined); setFQuotas({});
     setFStatus('Functioning'); setFInfraStatus('Standard');
     setIsAddOpen(false);
   }
@@ -214,46 +214,73 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
     const subDepartments = allChildren.filter(c => subDeptTypes.includes(c.type));
     const childFacilities = allChildren.filter(c => !subDeptTypes.includes(c.type));
 
-    const locationStr = [f.state, f.district, f.township].filter(Boolean).join(' • ');
-    const parentName = f.parentFacilityId ? facilities.find(p => p.id === f.parentFacilityId)?.name : null;
+    const totalQuota = f.customQuotas.reduce((acc, q) => acc + q.max, 0);
+    const totalOccupied = staffEntries.filter(s => s.currentFacilityId === f.id).length;
+    
+    // Aggregated stats for the right side of the card
+    const totalVacancy = f.customQuotas.reduce((acc, q) => {
+      const occupied = staffEntries.filter(s => s.currentFacilityId === f.id && s.position === q.position).length;
+      return acc + Math.max(0, q.max - occupied);
+    }, 0);
+    
+    const totalAttOut = staffEntries.filter(s => s.facilityId === f.id && s.currentFacilityId !== f.id).length;
+    const totalAttIn = staffEntries.filter(s => s.currentFacilityId === f.id && s.facilityId !== f.id).length;
+
     const isExpandedFacilities = expandedParents[f.id];
     const isSubDeptsExpanded = expandedSubDepts[f.id];
-    const isChild = depth > 0;
     const isCardExpanded = expandedCards[f.id] === true;
 
     return (
-      <motion.div 
-        layout
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        key={f.id} 
-        className={`bg-white rounded-3xl shadow-sm border ${isChild ? 'border-emerald-200 border-l-4' : 'border-slate-200'} flex flex-col h-full hover:shadow-xl hover:shadow-slate-200/40 transition-all duration-300 overflow-hidden group ml-${depth > 1 ? 4 : 0}`}
-      >
-        <div className="p-7">
-          <div className="flex justify-between items-start mb-6">
-            <div className="flex-1">
-              <div className="flex gap-2 items-center flex-wrap mb-3">
-                <span className="text-[10px] font-black bg-emerald-50 text-emerald-600 px-2.5 py-1 rounded-lg uppercase tracking-wider border border-emerald-100/50">{f.type}</span>
-                {parentName && <span className="text-[10px] font-black bg-slate-50 text-slate-500 px-2.5 py-1 rounded-lg border border-slate-200/60 uppercase tracking-wider">Parent: {parentName}</span>}
-                {f.status === 'Non-Functioning' && <span className="text-[10px] font-black bg-red-50 text-red-600 px-2.5 py-1 rounded-lg uppercase tracking-wider border border-red-100/50">Non-Functioning</span>}
-                {f.infrastructureStatus === 'Sub-standard' && <span className="text-[10px] font-black bg-orange-50 text-orange-600 px-2.5 py-1 rounded-lg uppercase tracking-wider border border-orange-100/50">Sub-standard</span>}
-              </div>
-              <h4 className="text-2xl font-black text-slate-900 font-display leading-tight">{f.name}</h4>
-              {locationStr && <p className="text-xs text-slate-500 font-bold mt-2 flex items-center gap-1.5 uppercase tracking-wide"><MapPin className="w-4 h-4 text-emerald-500" /> {locationStr}</p>}
-            </div>
-            <div className="flex flex-col items-end gap-2 shrink-0">
-              <button 
-                onClick={() => toggleCard(f.id)} 
-                className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
-              >
-                <ChevronRight className={`w-5 h-5 transition-transform ${isCardExpanded ? 'rotate-90' : ''}`} />
-              </button>
-              {role !== 'viewer' && (
-                <button onClick={() => openEditFacility(f)} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all opacity-0 group-hover:opacity-100">
-                  <MoreVertical className="w-4 h-4" />
-                </button>
-              )}
-            </div>
+      <div key={f.id} className="flex flex-col">
+        {/* STYLE 1 CARD */}
+        <motion.div 
+          layout
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`group bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden mb-3 ${isCardExpanded ? 'ring-2 ring-emerald-500/20' : ''}`}
+        >
+          <div className="flex flex-col md:flex-row items-stretch md:items-center p-4 md:p-6 gap-4 md:gap-6 min-h-[100px]">
+             {/* Left: Occupancy Badge & Title */}
+             <div className="flex-1 flex flex-col justify-center gap-3">
+                <div className={`w-fit px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${totalOccupied >= totalQuota && totalQuota > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                  {totalOccupied} / {totalQuota} OCCUPIED
+                </div>
+                <div className="flex items-center gap-3">
+                   <h4 className="text-sm md:text-base font-black text-slate-800 font-display leading-snug">
+                     {f.name}
+                   </h4>
+                   <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <button onClick={() => toggleCard(f.id)} className={`p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 transition-all ${isCardExpanded ? 'rotate-90 text-emerald-500 bg-emerald-50' : ''}`}>
+                         <ChevronRight className="w-4 h-4" />
+                      </button>
+                      {role !== 'viewer' && (
+                        <button onClick={() => openEditFacility(f)} className="p-1.5 rounded-lg hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-all">
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                   </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">{f.type}</span>
+                   {f.status === 'Non-Functioning' && <span className="text-[9px] font-black text-red-500 uppercase tracking-widest leading-none">• Non-Functioning</span>}
+                </div>
+             </div>
+
+             {/* Right: Stats Section */}
+             <div className="flex items-center gap-8 md:pl-8 md:border-l border-slate-100 shrink-0">
+                <div className="text-center">
+                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Vacancy</p>
+                   <p className={`text-xl font-black font-display ${totalVacancy > 0 ? 'text-slate-800' : 'text-slate-300'}`}>{totalVacancy}</p>
+                </div>
+                <div className="text-center">
+                   <p className="text-[9px] font-black text-blue-400 uppercase tracking-[0.2em] mb-1">Att Out</p>
+                   <p className={`text-xl font-black font-display ${totalAttOut > 0 ? 'text-blue-600' : 'text-slate-300'}`}>{totalAttOut}</p>
+                </div>
+                <div className="text-center">
+                   <p className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.2em] mb-1">Att In</p>
+                   <p className={`text-xl font-black font-display ${totalAttIn > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>{totalAttIn}</p>
+                </div>
+             </div>
           </div>
 
           <AnimatePresence>
@@ -262,216 +289,91 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
-                className="overflow-hidden"
+                className="border-t border-slate-50 bg-slate-50/30 overflow-hidden"
               >
-                <div className="grid grid-cols-1 gap-4 mt-2">
-                  {f.customQuotas.length === 0 && (
-                    <div className="py-4 px-6 bg-slate-50 rounded-2xl border border-dotted border-slate-300 text-center">
-                       <p className="text-[12px] text-slate-400 font-bold">သတ်မှတ်ချက်များ မရှိသေးပါ</p>
-                    </div>
-                  )}
-            {f.customQuotas.map(q => {
-              const allowed = q.max || 0;
-              const homeStaff = staffEntries.filter(s => s.facilityId === f.id && s.position === q.position);
-              const occupied = homeStaff.length;
-              const attachedOut = homeStaff.filter(s => s.currentFacilityId !== f.id).length;
-              const attachedIn = staffEntries.filter(s => s.currentFacilityId === f.id && s.facilityId !== f.id && s.position === q.position).length;
-              const vacancy = Math.max(0, allowed - occupied);
-              const isOver = allowed > 0 && occupied > allowed;
+                <div className="p-5 space-y-4">
+                  {f.customQuotas.length === 0 ? (
+                    <p className="text-center text-xs text-slate-400 py-4 font-bold italic">No positions defined for this facility.</p>
+                  ) : (
+                    f.customQuotas.map(q => {
+                      const allowed = q.max || 0;
+                      const homeStaff = staffEntries.filter(s => s.facilityId === f.id && s.position === q.position);
+                      const occupied = homeStaff.length;
+                      const attachedOut = homeStaff.filter(s => s.currentFacilityId !== f.id).length;
+                      const attachedIn = staffEntries.filter(s => s.currentFacilityId === f.id && s.facilityId !== f.id && s.position === q.position).length;
+                      const vacancy = Math.max(0, allowed - occupied);
+                      const isOver = allowed > 0 && occupied > allowed;
 
-              return (
-                <div key={q.position} className={`flex flex-col p-5 rounded-2xl border-2 transition-all duration-200 ${isOver ? 'bg-red-50/40 border-red-100 shadow-red-50' : 'bg-slate-50/50 border-slate-100 hover:border-emerald-100'}`}>
-                  <div className="flex items-center justify-between mb-4">
-                    <span className="text-base font-black text-slate-800 font-display">{q.position}</span>
-                    <button onClick={() => openRecruit(f.id, q.position)} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl shadow-sm text-xs font-bold hover:border-emerald-500 hover:text-emerald-600 transition-all active:scale-95 flex items-center gap-1.5 leading-none">
-                      <Plus className="w-4 h-4" /> Recruit
-                    </button>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-white/60 p-3 rounded-xl border border-slate-200/40">
-                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 leading-none">Occupied</p>
-                      <div className="flex items-baseline gap-1">
-                        <span className={`text-lg font-mono font-bold ${isOver ? 'text-red-600' : 'text-slate-900'}`}>{occupied}</span>
-                        <span className="text-xs font-bold text-slate-400">/ {allowed}</span>
-                      </div>
-                    </div>
-                    <div className="bg-white/60 p-3 rounded-xl border border-slate-200/40">
-                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 leading-none">Vacancy</p>
-                      <span className={`text-lg font-mono font-bold ${vacancy > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>{vacancy}</span>
-                    </div>
-                    <div className="bg-white/60 p-3 rounded-xl border border-slate-200/40">
-                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 leading-none">Out</p>
-                      <span className={`text-lg font-mono font-bold ${attachedOut > 0 ? 'text-amber-500' : 'text-slate-400'}`}>{attachedOut}</span>
-                    </div>
-                    <div className="bg-white/60 p-3 rounded-xl border border-slate-200/40">
-                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 leading-none">In</p>
-                      <span className={`text-lg font-mono font-bold ${attachedIn > 0 ? 'text-purple-600' : 'text-slate-400'}`}>{attachedIn}</span>
-                    </div>
-                  </div>
-
-                  {/* Occupied Staff CV Dropdown */}
-                  {(() => {
-                    const occupantList = staffEntries.filter(s => s.currentFacilityId === f.id && s.position === q.position);
-                    if (occupantList.length === 0) return null;
-                    return (
-                      <details className="mt-5 group/acc bg-white/40 border border-slate-200/60 rounded-2xl overflow-hidden">
-                        <summary className="px-5 py-3 text-xs font-black text-slate-600 cursor-pointer flex justify-between items-center outline-none list-none transition hover:bg-slate-100/50 uppercase tracking-widest">
-                          <span>Staff Details ({occupantList.length})</span>
-                          <span className="text-slate-400 group-open/acc:rotate-180 transition-transform text-xs">▼</span>
-                        </summary>
-                        <div className="p-4 flex flex-col gap-3 border-t border-slate-100">
-                          {occupantList.map((staff, sIdx) => {
-                            const isAttachedIn = staff.facilityId !== f.id;
-                            return (
-                              <div key={staff.id} className="flex justify-between p-3 rounded-xl bg-white border border-slate-100 shadow-sm gap-3 items-center group/staff transition-all hover:border-emerald-100">
-                                <div className="flex flex-col gap-1 min-w-0">
-                                  <div className="flex items-center gap-2 mb-1 mt-0.5">
-                                     <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center text-xs font-black text-slate-500 shadow-sm">{sIdx + 1}</div>
-                                     <div className="flex flex-col">
-                                       <span className="text-sm font-bold text-slate-800 truncate">
-                                        {isAttachedIn ? 'Attached In' : 'Permanent'}
-                                       </span>
-                                       <span className={`text-[10px] font-black w-fit px-1.5 py-0.5 rounded uppercase tracking-widest mt-0.5 ${staff.activeStatus === 'Leave' ? 'bg-amber-100 text-amber-700' : staff.activeStatus === 'Other' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                                         {staff.activeStatus || 'Active'}
-                                       </span>
-                                     </div>
-                                  </div>
-                                  {isAttachedIn && staff.reason && (
-                                    <p className="text-xs text-slate-500 font-medium ml-10 flex items-center gap-1 mt-1 break-words pb-1"><span className="text-purple-600 font-black shrink-0">REP:</span> {staff.reason}</p>
-                                  )}
-                                </div>
-                                
-                                <div className="flex items-center gap-2 shrink-0">
-                                  {role !== 'viewer' && (
-                                    <>
-                                      <button onClick={() => {
-                                        openRecruit(f.id, q.position);
-                                        setREditingStaffId(staff.id);
-                                        setRIsExternal(staff.facilityId === -1);
-                                        if (staff.facilityId !== -1 && staff.facilityId !== f.id) {
-                                          setRSourceFac(staff.facilityId.toString());
-                                        }
-                                        if (staff.facilityId === -1) {
-                                          setRExtName(staff.externalFacilityName || '');
-                                        }
-                                        setRDuty(staff.dutyStatus === 'Attached' ? 'attach' : 'main');
-                                        setRReason(staff.reason || '');
-                                        setRActiveStatus(staff.activeStatus || 'Active');
-                                        setRActiveReason(staff.activeReason || '');
-                                      }} className="p-2 bg-slate-50 text-slate-400 border border-slate-200 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 transition-all opacity-0 group-hover/staff:opacity-100" title="Edit">
-                                        <Edit2 className="w-3.5 h-3.5" />
-                                      </button>
-                                      
-                                      {!staff.cv ? (
-                                        <label className="cursor-pointer p-2 bg-slate-50 border border-slate-200 text-slate-400 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 transition-all opacity-0 group-hover/staff:opacity-100" title="Upload CV">
-                                          <input type="file" className="hidden" accept=".pdf,.doc,.docx,image/*" onChange={(e) => {
-                                            const file = e.target.files?.[0];
-                                            if (file) {
-                                              if (file.size > 2 * 1024 * 1024) {
-                                                alert('File is too large. Please upload a file smaller than 2MB.');
-                                                return;
-                                              }
-                                              const reader = new FileReader();
-                                              reader.onloadend = () => {
-                                                const updated = { ...staff, cv: file.name, cvDataUrl: reader.result as string };
-                                                updateStaff(updated);
-                                              };
-                                              reader.readAsDataURL(file);
-                                            }
-                                            e.target.value = '';
-                                          }} />
-                                          <Plus className="w-3.5 h-3.5" />
-                                        </label>
-                                      ) : (
-                                        <div className="flex items-center gap-1">
-                                          <button onClick={() => {
-                                            if (staff.cvDataUrl) {
-                                              setCvPreview({ name: staff.cv, dataUrl: staff.cvDataUrl });
-                                            } else {
-                                              alert(`File attached: ${staff.cv}\n(Document content is not available)`);
-                                            }
-                                          }} className="p-2 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl hover:bg-emerald-100 transition-all shadow-sm" title={`View CV (${staff.cv})`}>
-                                            <FileText className="w-3.5 h-3.5" />
-                                          </button>
-                                          <button onClick={() => {
-                                            if (confirm("Remove this CV?")) {
-                                              updateStaff({ ...staff, cv: '', cvDataUrl: '' });
-                                            }
-                                          }} className="p-2 bg-red-50 text-red-600 border border-red-100 rounded-xl hover:bg-red-100 transition-all shadow-sm opacity-0 group-hover/staff:opacity-100" title="Remove CV">
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                          </button>
-                                        </div>
-                                      )}
-                                    </>
-                                  )}
-                                  
-                                  {role === 'viewer' && staff.cv && (
-                                    <button onClick={() => {
-                                      if (staff.cvDataUrl) {
-                                        setCvPreview({ name: staff.cv, dataUrl: staff.cvDataUrl });
-                                      } else {
-                                        alert(`File attached: ${staff.cv}\n(Document content is not available)`);
-                                      }
-                                    }} className="p-2 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl hover:bg-emerald-100 transition-all shadow-sm" title={`View CV (${staff.cv})`}>
-                                      <FileText className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
+                      return (
+                        <div key={q.position} className={`p-4 bg-white border rounded-xl flex flex-col gap-3 transition-shadow hover:shadow-sm ${isOver ? 'border-red-200' : 'border-slate-100'}`}>
+                          <div className="flex items-center justify-between">
+                             <span className="text-xs font-black text-slate-700 font-display">{q.position}</span>
+                             <button onClick={() => openRecruit(f.id, q.position)} className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 transition-all flex items-center gap-1.5 leading-none">
+                               <Plus className="w-3 h-3" /> Recruit
+                             </button>
+                          </div>
+                          
+                          <div className="grid grid-cols-4 gap-4">
+                            <div>
+                               <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">Vacant</p>
+                               <span className={`text-sm font-black ${vacancy > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>{vacancy}</span>
+                            </div>
+                            <div>
+                               <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">Occupied</p>
+                               <span className="text-sm font-black text-slate-800">{occupied} / {allowed}</span>
+                            </div>
+                            <div>
+                               <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">Att Out</p>
+                               <span className={`text-sm font-black ${attachedOut > 0 ? 'text-blue-600' : 'text-slate-300'}`}>{attachedOut}</span>
+                            </div>
+                            <div>
+                               <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">Att In</p>
+                               <span className={`text-sm font-black ${attachedIn > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>{attachedIn}</span>
+                            </div>
+                          </div>
                         </div>
-                      </details>
-                    );
-                  })()}
+                      );
+                    })
+                  )}
                 </div>
-              );
-            })}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
 
-        {subDepartments.length > 0 && !showNoParentOnly && (
-          <div className="border-t border-slate-100 p-4 bg-slate-50 flex flex-col">
-            <button onClick={() => toggleSubDepts(f.id)} className="text-sm font-bold text-blue-600 w-full text-center py-2 hover:bg-blue-50 rounded-xl transition-colors flex items-center justify-center gap-2">
-               {isSubDeptsExpanded ? 'Sub-departments ဖျောက်မည်' : 'Sub-departments ပြမည်'} 
-               <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-lg text-xs">{subDepartments.length}</span>
-               <ChevronRight className={`w-4 h-4 transition-transform ${isSubDeptsExpanded ? 'rotate-90' : ''}`} />
-            </button>
-            {isSubDeptsExpanded && (
-              <AnimatePresence>
-                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                    <div className="flex flex-col gap-6 mt-4 p-2">
-                       {subDepartments.map(child => renderFacilityCard(child, depth + 1))}
-                    </div>
-                 </motion.div>
-              </AnimatePresence>
+        {/* Child Containers */}
+        {(subDepartments.length > 0 || childFacilities.length > 0) && !showNoParentOnly && (
+          <div className="ml-8 border-l-2 border-slate-100 pl-4 space-y-2 mb-4">
+            {subDepartments.length > 0 && (
+              <div className="flex flex-col">
+                 <button onClick={() => toggleSubDepts(f.id)} className="w-fit text-[10px] font-black text-blue-500/60 uppercase tracking-widest py-1 px-2 flex items-center gap-2 hover:text-blue-600 transition-colors">
+                   <ChevronRight className={`w-3 h-3 transition-transform ${isSubDeptsExpanded ? 'rotate-90' : ''}`} />
+                   Sub-Depts ({subDepartments.length})
+                 </button>
+                 {isSubDeptsExpanded && (
+                   <div className="flex flex-col mt-2">
+                     {subDepartments.map(child => renderFacilityCard(child, depth + 1))}
+                   </div>
+                 )}
+              </div>
+            )}
+
+            {childFacilities.length > 0 && (
+              <div className="flex flex-col">
+                 <button onClick={() => toggleParent(f.id)} className="w-fit text-[10px] font-black text-emerald-500/60 uppercase tracking-widest py-1 px-2 flex items-center gap-2 hover:text-emerald-600 transition-colors">
+                   <ChevronRight className={`w-3 h-3 transition-transform ${isExpandedFacilities ? 'rotate-90' : ''}`} />
+                   Child Facilities ({childFacilities.length})
+                 </button>
+                 {isExpandedFacilities && (
+                   <div className="flex flex-col mt-2">
+                     {childFacilities.map(child => renderFacilityCard(child, depth + 1))}
+                   </div>
+                 )}
+              </div>
             )}
           </div>
         )}
-
-        {childFacilities.length > 0 && !showNoParentOnly && (
-          <div className="border-t border-slate-100 p-4 bg-slate-50 flex flex-col">
-            <button onClick={() => toggleParent(f.id)} className="text-sm font-bold text-emerald-600 w-full text-center py-2 hover:bg-emerald-50 rounded-xl transition-colors flex items-center justify-center gap-2">
-               {isExpandedFacilities ? 'လက်အောက်ခံ ဌာနများ ဖျောက်မည်' : 'လက်အောက်ခံ ဌာနများ ပြမည်'} 
-               <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-lg text-xs">{childFacilities.length}</span>
-               <ChevronRight className={`w-4 h-4 transition-transform ${isExpandedFacilities ? 'rotate-90' : ''}`} />
-            </button>
-            {isExpandedFacilities && (
-              <AnimatePresence>
-                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                    <div className="flex flex-col gap-6 mt-4 p-2">
-                       {childFacilities.map(child => renderFacilityCard(child, depth + 1))}
-                    </div>
-                 </motion.div>
-              </AnimatePresence>
-            )}
-          </div>
-        )}
-      </motion.div>
+      </div>
     );
   };
 
@@ -606,7 +508,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                 <div>
                   <label className="block text-xs text-slate-500 font-medium mb-1">ဌာန အမျိုးအစား</label>
                   <select value={fType} onChange={e => handleFacTypeChange(e.target.value)} className="w-full p-2.5 border border-slate-200 bg-slate-50 rounded-lg outline-none focus:border-emerald-500">
-                    {facilityTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                    {facilityTypes.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
                   </select>
                 </div>
                 <div className="col-span-2">
@@ -740,7 +642,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                   e.target.value = "";
                 }} className="w-full p-2.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-emerald-500 bg-white">
                   <option value="">ရာထူးရွေးချယ်ပါ...</option>
-                  {positionsList.map(p => <option key={p} value={p}>{p}</option>)}
+                  {positionsList.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
                 </select>
               </div>
 

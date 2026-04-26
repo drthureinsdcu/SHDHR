@@ -46,13 +46,32 @@
         "max": { "type": "number" }
       }
     },
+    "FacilityType": {
+      "title": "FacilityType",
+      "description": "Facility Type classification",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "category": { "type": "string" }
+      }
+    },
+    "Position": {
+      "title": "Position",
+      "description": "System position/designation",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "rank": { "type": "number" },
+        "category": { "type": "string" }
+      }
+    },
     "Settings": {
       "title": "Settings",
       "description": "Global Settings",
       "type": "object",
       "properties": {
-         "facilityTypes": { "type": "array", "items": { "type": "string" } },
-         "positionsList": { "type": "array", "items": { "type": "string" } },
+         "facilityTypes": { "type": "array", "items": { "$ref": "#/entities/FacilityType" } },
+         "positionsList": { "type": "array", "items": { "$ref": "#/entities/Position" } },
          "locations": { "type": "array", "items": { "type": "object" } },
          "subdepartmentsMap": { "type": "object" }
       }

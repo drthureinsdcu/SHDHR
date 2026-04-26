@@ -106,11 +106,12 @@ export default function OrganizationChart({ facilities, staffEntries, subdepartm
         </div>
       </div>
 
-      <div className={`bg-white rounded-3xl border border-slate-200/60 shadow-sm p-8 overflow-auto custom-scroll flex justify-center ${isFullscreen ? 'h-[calc(100vh-100px)] rounded-none border-0' : 'min-h-[600px]'}`}>
-        <div 
-          className="min-w-max pb-8 org-tree origin-top" 
-          style={{ transform: `scale(${zoomLevel})`, transition: 'transform 0.2s ease' }}
-        >
+      <div className={`bg-white rounded-3xl border border-slate-200/60 shadow-sm p-8 overflow-auto custom-scroll flex ${isFullscreen ? 'h-[calc(100vh-100px)] rounded-none border-0' : 'min-h-[600px]'}`}>
+        <div className="min-w-full flex justify-center">
+          <div 
+            className="min-w-max pb-8 org-tree origin-top inline-block" 
+            style={{ transform: `scale(${zoomLevel})`, transition: 'transform 0.2s ease' }}
+          >
           {rootFacilities.length > 0 ? (
             <ul>
               {rootFacilities.map(f => (
@@ -131,6 +132,7 @@ export default function OrganizationChart({ facilities, staffEntries, subdepartm
           ) : (
             <div className="text-center py-10 text-slate-400 font-medium">ဌာနများ မရှိသေးပါ။</div>
           )}
+          </div>
         </div>
       </div>
 
@@ -225,27 +227,30 @@ function OrgNode({ facility, facilities, staffEntries, expandedNodes, toggleNode
       <div className="relative z-10 flex flex-col items-center">
         <div className="flex relative">
           {/* Main Node Card */}
-          <div className="bg-[#0e7db8] rounded-xl shadow-md w-72 flex flex-col items-center p-4 relative">
+          <div className="bg-white border-2 border-slate-200 rounded-[2rem] shadow-xl w-72 flex flex-col items-center p-6 relative group overflow-hidden hover:border-emerald-200 transition-all">
+            <div className={`absolute top-0 left-0 w-full h-1.5 ${localStatus.color.split(' ')[0]}`} />
+            
             {localQuota > 0 && (
-              <div className={`absolute -top-3 -right-3 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border shadow-sm ${localStatus.color}`}>
+              <div className={`absolute top-4 right-4 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border shadow-sm ${localStatus.color}`}>
                 {localStatus.label}
               </div>
             )}
-            <div className="flex items-center gap-2 mb-1 justify-center">
-              <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${localStatus.color.replace('bg-', 'bg-').split(' ')[0]} border border-white/20`} title={localStatus.label} />
-              <h4 className="text-white font-bold text-lg leading-tight text-center font-display">{facility.name}</h4>
+            
+            <div className="flex flex-col items-center gap-1 mb-4 mt-2">
+              <h4 className="text-slate-900 font-black text-xl leading-tight text-center font-display">{facility.name}</h4>
+              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">{facility.type}</p>
             </div>
-            <p className="text-blue-100 text-xs mb-3">{facility.type}</p>
-            <div className="flex gap-2 mb-4 justify-center flex-wrap">
-              {facility.status === 'Non-Functioning' && <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded shadow">Non-Functioning</span>}
-              {facility.infrastructureStatus === 'Sub-standard' && <span className="text-[10px] bg-orange-500 text-white px-2 py-0.5 rounded shadow">Sub-standard</span>}
+
+            <div className="flex gap-2 mb-6 justify-center flex-wrap">
+              {facility.status === 'Non-Functioning' && <span className="text-[9px] font-black bg-red-50 text-red-600 px-2.5 py-1 rounded-lg border border-red-100 uppercase">Non-Functioning</span>}
+              {facility.infrastructureStatus === 'Sub-standard' && <span className="text-[9px] font-black bg-orange-50 text-orange-600 px-2.5 py-1 rounded-lg border border-orange-100 uppercase">Sub-standard</span>}
             </div>
             
             <div className="grid grid-cols-2 gap-3 w-full mt-auto">
-              <button onClick={() => showStats('local')} className="flex items-center justify-center gap-1.5 bg-white/20 hover:bg-white/30 text-white py-2 px-3 rounded-lg text-sm font-medium transition-colors">
+              <button onClick={() => showStats('local')} className="flex items-center justify-center gap-1.5 bg-slate-900 text-white py-2.5 px-3 rounded-xl text-xs font-bold transition-all hover:bg-slate-800 active:scale-95 shadow-lg shadow-slate-200">
                 <List className="w-4 h-4" /> အသေးစိတ်
               </button>
-              <button onClick={() => showStats('overall')} className="flex items-center justify-center gap-1.5 bg-white/20 hover:bg-white/30 text-white py-2 px-3 rounded-lg text-sm font-medium transition-colors">
+              <button onClick={() => showStats('overall')} className="flex items-center justify-center gap-1.5 bg-emerald-600 text-white py-2.5 px-3 rounded-xl text-xs font-bold transition-all hover:bg-emerald-700 active:scale-95 shadow-lg shadow-emerald-100">
                 <Network className="w-4 h-4" /> စုစုပေါင်း
               </button>
             </div>
@@ -334,16 +339,17 @@ function SubDeptNode({ subFac, staffEntries, setModalData }: { key?: React.Key, 
   };
 
   return (
-    <div className="bg-white border border-slate-200 shadow-xl rounded-xl p-3 flex flex-col gap-2 relative w-full group overflow-hidden">
-        <div className="flex items-start gap-2">
-            <div className={`w-2 h-2 mt-1.5 rounded-full shrink-0 shadow-sm ${getStatusColor()}`} />
-            <h5 className="font-bold text-sm text-slate-800 leading-tight">{subFac.name}</h5>
+    <div className="bg-white border-2 border-slate-200 shadow-xl rounded-[1.5rem] p-5 flex flex-col gap-4 relative w-full group overflow-hidden hover:border-blue-200 transition-all">
+        <div className={`absolute top-0 left-0 w-1.5 h-full ${getStatusColor()}`} />
+        <div className="flex flex-col gap-1">
+            <h5 className="font-black text-[15px] text-slate-800 leading-tight font-display">{subFac.name}</h5>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{subFac.type}</span>
         </div>
-        <div className="flex justify-between items-center pl-4">
-            <span className="text-xs text-slate-500 font-medium truncate pr-2">{subFac.type}</span>
-            <span className="text-xs font-bold text-[#0e7db8] whitespace-nowrap">{localOccupied} / {localQuota}</span>
+        <div className="flex justify-between items-center mt-2 p-2 bg-slate-50 rounded-xl border border-slate-100">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Occupied</span>
+            <span className="text-xs font-black text-blue-600">{localOccupied} / {localQuota}</span>
         </div>
-        <button onClick={() => setModalData({ facility: subFac, type: 'local' })} className="mt-1 w-full flex items-center justify-center gap-1.5 bg-slate-50 border border-slate-100 hover:bg-slate-100 hover:border-slate-200 text-[#0e7db8] py-1.5 px-2 rounded-lg text-[10px] font-bold uppercase transition-colors">
+        <button onClick={() => setModalData({ facility: subFac, type: 'local' })} className="w-full flex items-center justify-center gap-1.5 bg-slate-900 text-white py-2 px-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all hover:bg-slate-800 active:scale-95">
             <List className="w-3 h-3" /> အသေးစိတ်
         </button>
     </div>
@@ -448,65 +454,74 @@ function StatsModal({ facility, type, facilities, staffEntries, subdepartmentsMa
           <h2 className="text-2xl font-black text-slate-900 font-display">{facility.name} <span className="text-slate-400 font-medium text-lg">({facility.type})</span></h2>
         </div>
 
-        <div className="p-6 overflow-y-auto flex-1 custom-scroll">
+        <div className="p-6 overflow-y-auto flex-1 custom-scroll bg-slate-50/30">
           {statsList.length === 0 ? (
             <div className="text-center text-slate-400 py-10 font-medium bg-slate-50 rounded-2xl border border-slate-200 border-dashed">ရာထူးသတ်မှတ်ချက် (Quotas) မရှိသေးပါ။</div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex flex-col gap-3">
               {statsList.map((stat, i) => (
-                <div key={i} className="border border-slate-200 rounded-2xl p-5 hover:border-[#0e7db8]/30 hover:shadow-md transition-all">
-                  <div className="flex justify-between items-start mb-4">
-                    <h3 className="font-bold text-slate-800 text-lg">{stat.position}</h3>
-                    <div className={`px-2.5 py-1 rounded-lg text-xs font-black uppercase tracking-wider ${stat.vacancy < 0 ? 'bg-red-100 text-red-700 border border-red-200' : stat.vacancy > 0 ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
-                      {stat.occupied} / {stat.quota} Occupied
+                <div key={i} className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden">
+                  <div className="flex flex-col md:flex-row items-stretch md:items-center p-4 md:p-6 gap-4 md:gap-6 min-h-[100px]">
+                    {/* Left: Occupancy Badge & Title */}
+                    <div className="flex-1 flex flex-col justify-center gap-2">
+                       <div className={`w-fit px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${stat.occupied >= stat.quota && stat.quota > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                         {stat.occupied} / {stat.quota} OCCUPIED
+                       </div>
+                       <h3 className="text-sm md:text-base font-black text-slate-800 font-display leading-snug">
+                         {stat.position}
+                       </h3>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-3 gap-2 mb-4">
-                    <div className="bg-slate-50 rounded-xl p-3 text-center border border-slate-100">
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Vacancy</p>
-                      <p className={`text-lg font-black ${stat.vacancy < 0 ? 'text-red-500' : 'text-slate-800'}`}>{stat.vacancy}</p>
-                    </div>
-                    <div className="bg-blue-50/50 rounded-xl p-3 text-center border border-blue-100/50">
-                      <p className="text-[10px] text-blue-600/70 font-bold uppercase tracking-wider mb-1">Att Out</p>
-                      <p className="text-lg font-black text-blue-900">{stat.attOut}</p>
-                    </div>
-                    <div className="bg-emerald-50/50 rounded-xl p-3 text-center border border-emerald-100/50">
-                      <p className="text-[10px] text-emerald-600/70 font-bold uppercase tracking-wider mb-1">Att In</p>
-                      <p className="text-lg font-black text-emerald-900">{stat.attIn}</p>
+                    {/* Right: Stats Section */}
+                    <div className="flex items-center gap-8 md:pl-8 md:border-l border-slate-100 shrink-0">
+                       <div className="text-center w-16">
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Vacancy</p>
+                          <p className={`text-xl font-black font-display ${stat.vacancy > 0 ? 'text-slate-800' : 'text-slate-300'}`}>{stat.vacancy}</p>
+                       </div>
+                       <div className="text-center w-16">
+                          <p className="text-[9px] font-black text-blue-400 uppercase tracking-[0.2em] mb-1">Att Out</p>
+                          <p className={`text-xl font-black font-display ${stat.attOut > 0 ? 'text-blue-600' : 'text-slate-300'}`}>{stat.attOut}</p>
+                       </div>
+                       <div className="text-center w-16">
+                          <p className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.2em] mb-1">Att In</p>
+                          <p className={`text-xl font-black font-display ${stat.attIn > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>{stat.attIn}</p>
+                       </div>
                     </div>
                   </div>
 
                   {stat.occupied > 0 && (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-slate-500 font-medium">Active:</span>
-                        <span className="font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">{stat.activeCount}</span>
-                      </div>
-                      
-                      <div className="flex items-start justify-between text-sm">
-                         <span className="text-slate-500 font-medium whitespace-nowrap mr-2">Leave:</span>
-                         <div className="text-right flex-1">
-                           <span className="font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded mb-1 inline-block">{stat.leaveCount}</span>
-                           {stat.leaves.length > 0 && (
-                              <div className="text-[11px] text-slate-400 mt-1 space-y-1">
-                                {stat.leaves.map((l, idx) => <span key={idx} className="block">• {l}</span>)}
-                              </div>
-                           )}
-                         </div>
-                      </div>
-
-                      <div className="flex items-start justify-between text-sm">
-                         <span className="text-slate-500 font-medium whitespace-nowrap mr-2">Other:</span>
-                         <div className="text-right flex-1">
-                           <span className="font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded mb-1 inline-block">{stat.otherCount}</span>
-                           {stat.others.length > 0 && (
-                              <div className="text-[11px] text-slate-400 mt-1 space-y-1">
-                                {stat.others.map((l, idx) => <span key={idx} className="block">• {l}</span>)}
-                              </div>
-                           )}
-                         </div>
-                      </div>
+                    <div className="px-6 pb-4 border-t border-slate-50 pt-3">
+                       <div className="flex flex-wrap gap-4">
+                          <div className="flex items-center gap-2">
+                             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                             <span className="text-[10px] font-black text-slate-400 uppercase">Active</span>
+                             <span className="text-xs font-black text-slate-700">{stat.activeCount}</span>
+                          </div>
+                          {stat.leaveCount > 0 && (
+                             <div className="flex items-center gap-2">
+                                <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                                <span className="text-[10px] font-black text-slate-400 uppercase">Leave</span>
+                                <span className="text-xs font-black text-orange-600">{stat.leaveCount}</span>
+                                <div className="flex gap-1">
+                                   {stat.leaves.slice(0, 2).map((l, idx) => (
+                                      <span key={idx} className="text-[9px] bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded border border-orange-100 font-bold">{l}</span>
+                                   ))}
+                                </div>
+                             </div>
+                          )}
+                          {stat.otherCount > 0 && (
+                             <div className="flex items-center gap-2">
+                                <div className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                                <span className="text-[10px] font-black text-slate-400 uppercase">Other</span>
+                                <span className="text-xs font-black text-purple-600">{stat.otherCount}</span>
+                                <div className="flex gap-1">
+                                   {stat.others.slice(0, 2).map((l, idx) => (
+                                      <span key={idx} className="text-[9px] bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded border border-purple-100 font-bold">{l}</span>
+                                   ))}
+                                </div>
+                             </div>
+                          )}
+                       </div>
                     </div>
                   )}
                 </div>

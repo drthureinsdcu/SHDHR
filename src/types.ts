@@ -45,9 +45,20 @@ export interface RegionData {
   }[];
 }
 
+export interface Position {
+  name: string;
+  rank: number;
+  category: 'Public Health' | 'Clinical';
+}
+
+export interface FacilityType {
+  name: string;
+  category: 'Public Health' | 'Clinical';
+}
+
 export interface AppState {
-  facilityTypes: string[];
-  positionsList: string[];
+  facilityTypes: FacilityType[];
+  positionsList: Position[];
   globalDefaultQuotas: Quota[];
   facilities: Facility[];
   staffEntries: Staff[];
