@@ -55,6 +55,7 @@ export interface Position {
 export interface FacilityType {
   name: string;
   category: 'Public Health' | 'Clinical';
+  level?: number;
 }
 
 export interface AppState {

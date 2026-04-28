@@ -18,6 +18,7 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
   const [isTypeOpen, setIsTypeOpen] = useState(false);
   const [newTypeName, setNewTypeName] = useState('');
   const [newTypeCat, setNewTypeCat] = useState<'Public Health' | 'Clinical'>('Public Health');
+  const [newTypeLevel, setNewTypeLevel] = useState<number | ''>('');
   const [editingType, setEditingType] = useState<string | null>(null);
   const [manageSubDept, setManageSubDept] = useState<string | null>(null);
   const [newSubDept, setNewSubDept] = useState('');
@@ -245,9 +246,10 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
 
   const saveFacType = () => {
     const base = newTypeName.trim();
+    const l = newTypeLevel === '' ? undefined : Number(newTypeLevel);
     if (base) {
       if (editingType) {
-        const newList = facilityTypes.map(t => t.name === editingType ? { name: base, category: newTypeCat } : t);
+        const newList = facilityTypes.map(t => t.name === editingType ? { name: base, category: newTypeCat, level: l } : t);
         updateFacilityTypes(newList);
 
         // Also update subdepartments map if the name changed
@@ -259,7 +261,7 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
         }
       } else {
         if (!facilityTypes.find(f => f.name === base)) {
-          updateFacilityTypes([...facilityTypes, { name: base, category: newTypeCat }]);
+          updateFacilityTypes([...facilityTypes, { name: base, category: newTypeCat, level: l }]);
         }
         
         const valLower = base.toLowerCase();
@@ -271,10 +273,10 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
         if (defaultSubDepts.length > 0) {
           const finalSubDepts = defaultSubDepts.map(d => `${base} - ${d}`);
           
-          const expandedFacTypes = [...facilityTypes, { name: base, category: newTypeCat }];
+          const expandedFacTypes = [...facilityTypes, { name: base, category: newTypeCat, level: l }];
           finalSubDepts.forEach(t => {
             if (!expandedFacTypes.find(f => f.name === t)) {
-              expandedFacTypes.push({ name: t, category: newTypeCat });
+              expandedFacTypes.push({ name: t, category: newTypeCat, level: l });
             }
           });
           updateFacilityTypes(expandedFacTypes);
@@ -286,6 +288,7 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
 
       setIsTypeOpen(false);
       setNewTypeName('');
+      setNewTypeLevel('');
       setEditingType(null);
     }
   }
@@ -495,7 +498,7 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
                       <p className="text-[11px] text-slate-400 font-bold uppercase tracking-widest leading-none mt-1">Classification Categories</p>
                     </div>
                   </div>
-                  <button onClick={() => { setNewTypeCat('Public Health'); setNewTypeName(''); setEditingType(null); setIsTypeOpen(true); }} className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl text-[13px] font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all flex items-center gap-2 active:scale-95">
+                  <button onClick={() => { setNewTypeCat('Public Health'); setNewTypeName(''); setNewTypeLevel(''); setEditingType(null); setIsTypeOpen(true); }} className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl text-[13px] font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all flex items-center gap-2 active:scale-95">
                     <Plus className="w-4 h-4" /> Add Type
                   </button>
                </div>
@@ -514,12 +517,16 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
                         return (
                           <div key={t.name} className="group flex flex-col gap-2 p-3 bg-white border border-slate-200 rounded-2xl hover:border-emerald-200 transition-all">
                             <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-slate-700">{t.name}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-slate-700">{t.name}</span>
+                                {t.level && <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Level {t.level}</span>}
+                              </div>
                               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button onClick={() => {
                                   setEditingType(t.name);
                                   setNewTypeName(t.name);
                                   setNewTypeCat(t.category);
+                                  setNewTypeLevel(t.level || '');
                                   setIsTypeOpen(true);
                                 }} className="p-1 text-slate-300 hover:text-emerald-500 transition-all">
                                   <Edit2 className="w-3.5 h-3.5" />
@@ -551,12 +558,16 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
                         return (
                           <div key={t.name} className="group flex flex-col gap-2 p-3 bg-white border border-slate-200 rounded-2xl hover:border-blue-200 transition-all">
                             <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-slate-700">{t.name}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-slate-700">{t.name}</span>
+                                {t.level && <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Level {t.level}</span>}
+                              </div>
                               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button onClick={() => {
                                   setEditingType(t.name);
                                   setNewTypeName(t.name);
                                   setNewTypeCat(t.category);
+                                  setNewTypeLevel(t.level || '');
                                   setIsTypeOpen(true);
                                 }} className="p-1 text-slate-300 hover:text-blue-500 transition-all">
                                   <Edit2 className="w-3.5 h-3.5" />
@@ -1062,6 +1073,10 @@ export default function Settings({ state }: { state: ReturnType<typeof import('.
               <div className="space-y-1.5">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">Type Name</label>
                 <input value={newTypeName} onChange={e=>setNewTypeName(e.target.value)} type="text" placeholder="e.g. Hospital" className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm font-bold focus:border-emerald-500 transition-all" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">Level (Optional)</label>
+                <input value={newTypeLevel} onChange={e=>setNewTypeLevel(e.target.value === '' ? '' : Number(e.target.value))} type="number" min="1" placeholder="e.g. 1" className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm font-bold focus:border-emerald-500 transition-all" />
               </div>
             </div>
             <div className="mt-8 flex justify-end gap-3">

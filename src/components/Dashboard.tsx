@@ -375,7 +375,7 @@ export default function Dashboard({ state }: { state: ReturnType<typeof import('
         transition={{ delay: 0.3 }}
         className="mt-12 w-full"
       >
-        <OrganizationChart facilities={facilities} staffEntries={staffEntries} subdepartmentsMap={state.subdepartmentsMap} />
+        <OrganizationChart facilities={facilities} staffEntries={staffEntries} subdepartmentsMap={state.subdepartmentsMap} facilityTypes={state.facilityTypes} />
       </motion.div>
 
       {/* NEW DASHBOARD WIDGETS */}

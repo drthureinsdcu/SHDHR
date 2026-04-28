@@ -251,21 +251,90 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
       if (!groups[loc]) groups[loc] = [];
       groups[loc].push(f);
     });
+    
+    // Sort facilities in each group by level
+    Object.keys(groups).forEach(loc => {
+      groups[loc].sort((a, b) => {
+        const typeA = facilityTypes.find(t => t.name === a.type);
+        const typeB = facilityTypes.find(t => t.name === b.type);
+        const levelA = typeA?.level ?? 999;
+        const levelB = typeB?.level ?? 999;
+        return levelA - levelB;
+      });
+    });
+
     return groups;
-  }, [rootFacilitiesToShow]);
+  }, [rootFacilitiesToShow, facilityTypes]);
 
   const [expandedLocations, setExpandedLocations] = useState<Record<string, boolean>>({});
-  const [expandedParents, setExpandedParents] = useState<Record<number, boolean>>({});
+  const [expandedParents, setExpandedParents] = useState<Record<string | number, boolean>>({});
   const [expandedSubDepts, setExpandedSubDepts] = useState<Record<number, boolean>>({});
   const [expandedCards, setExpandedCards] = useState<Record<number, boolean>>({});
   const [cardFilters, setCardFilters] = useState<Record<number, 'all'|'vacancy'|'attOut'|'attIn'>>({});
   const [showNoParentOnly, setShowNoParentOnly] = useState(false);
 
+  const availableLevels = React.useMemo(() => {
+    const levels = new Set<number>();
+    facilities.forEach(f => {
+      const type = facilityTypes?.find(t => t.name === f.type);
+      if (type?.level !== undefined) {
+        levels.add(type.level);
+      }
+    });
+    return Array.from(levels).sort((a, b) => a - b);
+  }, [facilities, facilityTypes]);
+
+  const expandToLevel = (targetLevel: number) => {
+    const newState: Record<string | number, boolean> = {};
+    const locState: Record<string, boolean> = { ...expandedLocations }; // Or expand all locations
+
+    facilities.forEach(f => {
+      const type = facilityTypes?.find(t => t.name === f.type);
+      const level = type?.level ?? 999;
+      
+      const loc = [f.state, f.district, f.township].filter(Boolean).join(' • ') || 'Unspecified Location';
+      locState[loc] = true;
+
+      // When asked to expand to level 2, it means level 1 items should be expanded to show level 2.
+      if (level < targetLevel) {
+        availableLevels.forEach(lvl => {
+          if (lvl <= targetLevel) {
+            newState[`${f.id}-level-${lvl}`] = true;
+            newState[`subdept-${f.id}-level-${lvl}`] = true;
+            newState[`root-${loc}-level-${lvl}`] = true;
+          }
+        });
+      }
+    });
+    setExpandedParents(newState);
+    setExpandedLocations(locState);
+  };
+
+  const expandAllLevels = () => {
+    const newState: Record<string | number, boolean> = {};
+    const locState: Record<string, boolean> = {};
+
+    facilities.forEach(f => {
+      const loc = [f.state, f.district, f.township].filter(Boolean).join(' • ') || 'Unspecified Location';
+      locState[loc] = true;
+      availableLevels.forEach(lvl => {
+          newState[`${f.id}-level-${lvl}`] = true;
+          newState[`subdept-${f.id}-level-${lvl}`] = true;
+          newState[`root-${loc}-level-${lvl}`] = true;
+      });
+      newState[`${f.id}-level-unk`] = true;
+      newState[`subdept-${f.id}-level-unk`] = true;
+      newState[`root-${loc}-level-unk`] = true;
+    });
+    setExpandedParents(newState);
+    setExpandedLocations(locState);
+  };
+
   const toggleLocation = (loc: string) => {
     setExpandedLocations(prev => ({ ...prev, [loc]: !prev[loc] }));
   };
 
-  const toggleParent = (id: number) => {
+  const toggleParent = (id: string | number) => {
     setExpandedParents(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
@@ -293,11 +362,92 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
     setExpandedCards(prev => ({ ...prev, [id]: true }));
   };
 
+  const renderFacilityList = (facs: Facility[], parentKey: string, depth = 0) => {
+    if (facs.length === 0) return null;
+
+    const groups: Record<number, Facility[]> = {};
+    const unknownLevel: Facility[] = [];
+    facs.forEach(c => {
+      const type = facilityTypes?.find(t => t.name === c.type);
+      const level = type?.level;
+      if (level !== undefined && level !== null) {
+        if (!groups[level]) groups[level] = [];
+        groups[level].push(c);
+      } else {
+        unknownLevel.push(c);
+      }
+    });
+
+    const sortedLevels = Object.keys(groups).map(Number).sort((a, b) => a - b);
+
+    if (sortedLevels.length === 0 && unknownLevel.length === 0) return null;
+
+    return (
+      <div className="flex flex-col gap-2 mt-2">
+        {sortedLevels.map(level => {
+          const levelFacs = groups[level];
+          const groupKey = `${parentKey}-level-${level}`;
+          const isGroupExpanded = expandedParents[groupKey] ?? false; // Default collapsed
+          return (
+            <div key={groupKey} className="flex flex-col border border-slate-200 rounded-lg bg-slate-50">
+              <button 
+                onClick={() => toggleParent(groupKey)} 
+                className="w-full flex items-center justify-between p-2 text-left hover:bg-slate-100 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                   <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isGroupExpanded ? 'rotate-90 text-blue-500' : 'text-slate-400'}`} />
+                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">Level {level} Facilities</span>
+                   <span className="bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[9px] font-bold">{levelFacs.length}</span>
+                </div>
+              </button>
+              {isGroupExpanded && (
+                 <div className="p-2 pt-0 flex flex-col gap-2">
+                   {levelFacs.map(c => renderFacilityCard(c, depth))}
+                 </div>
+              )}
+            </div>
+          );
+        })}
+        {unknownLevel.length > 0 && (
+          <div className="flex flex-col border border-slate-200 rounded-lg bg-slate-50">
+            <button 
+              onClick={() => toggleParent(`${parentKey}-level-unk`)} 
+              className="w-full flex items-center justify-between p-2 text-left hover:bg-slate-100 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                 <ChevronRight className={`w-3.5 h-3.5 transition-transform ${expandedParents[`${parentKey}-level-unk`] ? 'rotate-90 text-slate-500' : 'text-slate-400'}`} />
+                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">Other Facilities</span>
+                 <span className="bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[9px] font-bold">{unknownLevel.length}</span>
+              </div>
+            </button>
+            {expandedParents[`${parentKey}-level-unk`] && (
+               <div className="p-2 pt-0 flex flex-col gap-2">
+                 {unknownLevel.map(c => renderFacilityCard(c, depth))}
+               </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderFacilityCard = (f: Facility, depth = 0) => {
     const allChildren = facilities.filter(child => child.parentFacilityId === f.id);
     const subDeptTypes = state.subdepartmentsMap[f.type] || [];
-    const subDepartments = allChildren.filter(c => subDeptTypes.includes(c.type));
-    const childFacilities = allChildren.filter(c => !subDeptTypes.includes(c.type));
+    
+    let subDepartments = allChildren.filter(c => subDeptTypes.includes(c.type));
+    let childFacilities = allChildren.filter(c => !subDeptTypes.includes(c.type));
+
+    const sortByLevel = (a: Facility, b: Facility) => {
+      const typeA = facilityTypes.find(t => t.name === a.type);
+      const typeB = facilityTypes.find(t => t.name === b.type);
+      const levelA = typeA?.level ?? 999;
+      const levelB = typeB?.level ?? 999;
+      return levelA - levelB;
+    };
+
+    subDepartments.sort(sortByLevel);
+    childFacilities.sort(sortByLevel);
 
     const totalQuota = f.customQuotas.reduce((acc, q) => acc + q.max, 0);
     const totalOccupied = staffEntries.filter(s => s.facilityId === f.id).length;
@@ -346,9 +496,16 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                          <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-300 ${isCardExpanded ? 'rotate-90' : ''}`} />
                       </button>
                       {canEditFacility(f.township) && (
-                        <button onClick={() => openEditFacility(f)} className="p-2 rounded-xl border bg-white border-slate-200 text-slate-500 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-600 transition-all shadow-sm">
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
+                        <>
+                          <button onClick={() => openEditFacility(f)} className="p-2 rounded-xl border bg-white border-slate-200 text-slate-500 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-600 transition-all shadow-sm">
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          {role === 'admin' && (
+                            <button onClick={() => safeDelete(() => deleteFacility(f.id), `ဌာန '${f.name}' ကို ဖျက်ပစ်မည်မှာ သေချာပါသလား?`)} className="p-2 rounded-xl border bg-white border-slate-200 text-slate-500 hover:bg-red-50 hover:border-red-200 hover:text-red-600 transition-all shadow-sm">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </>
                       )}
                    </div>
                 </div>
@@ -522,7 +679,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                  </button>
                  {isSubDeptsExpanded && (
                    <div className="flex flex-col mt-2">
-                     {subDepartments.map(child => renderFacilityCard(child, depth + 1))}
+                     {renderFacilityList(subDepartments, `subdept-${f.id}`, depth + 1)}
                    </div>
                  )}
               </div>
@@ -536,7 +693,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                  </button>
                  {isExpandedFacilities && (
                    <div className="flex flex-col mt-2">
-                     {childFacilities.map(child => renderFacilityCard(child, depth + 1))}
+                     {renderFacilityList(childFacilities, f.id.toString(), depth + 1)}
                    </div>
                  )}
               </div>
@@ -554,27 +711,49 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
           <h2 className="text-3xl sm:text-4xl font-black text-slate-900 font-display leading-tight">Facilities Management</h2>
           <p className="text-slate-500 text-base sm:text-lg mt-2 font-medium">ဌာနများ၏ လစ်လပ်ရာထူးများအား စီမံခန့်ခွဲခြင်းနှင့် ဝန်ထမ်းခန့်အပ်ခြင်း</p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto">
-          <div className="relative group flex-1 sm:w-64">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-400 group-focus-within:text-emerald-500 transition-colors" />
-            <input 
-              type="text" 
-              placeholder="Search facilities..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/5 transition-all shadow-sm"
-            />
-          </div>
-          <button 
-            onClick={() => setShowNoParentOnly(!showNoParentOnly)} 
-            className={`px-4 py-3 rounded-xl border text-[13px] font-bold transition-all flex items-center justify-center gap-2 shadow-sm ${showNoParentOnly ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-          >
-            <Filter className="w-4 h-4" /> {showNoParentOnly ? 'ပင်မဌာနများသာ' : 'ပင်မဌာနများသာ ပြမည်'}
-          </button>
-          {canEditFacility() && (
-            <button onClick={openAddFacility} className="bg-emerald-600 text-white px-6 py-3 rounded-xl text-[13px] font-bold hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 active:scale-95 shrink-0">
-              <Plus className="w-4 h-4" /> ဌာနအသစ် ထည့်သွင်းရန်
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto">
+            <div className="relative group flex-1 sm:w-64">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-400 group-focus-within:text-emerald-500 transition-colors" />
+              <input 
+                type="text" 
+                placeholder="Search facilities..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/5 transition-all shadow-sm"
+              />
+            </div>
+            <button 
+              onClick={() => setShowNoParentOnly(!showNoParentOnly)} 
+              className={`px-4 py-3 rounded-xl border text-[13px] font-bold transition-all flex items-center justify-center gap-2 shadow-sm ${showNoParentOnly ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+            >
+              <Filter className="w-4 h-4" /> {showNoParentOnly ? 'ပင်မဌာနများသာ' : 'ပင်မဌာနများသာ ပြမည်'}
             </button>
+            {canEditFacility() && (
+              <button onClick={openAddFacility} className="bg-emerald-600 text-white px-6 py-3 rounded-xl text-[13px] font-bold hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 active:scale-95 shrink-0">
+                <Plus className="w-4 h-4" /> ဌာနအသစ် ထည့်သွင်းရန်
+              </button>
+            )}
+          </div>
+          {availableLevels.length > 0 && (
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 custom-scroll hide-scrollbar xl:justify-end">
+               <span className="text-xs font-bold text-slate-500 whitespace-nowrap">Expand to:</span>
+               <button
+                  onClick={expandAllLevels}
+                  className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors whitespace-nowrap shadow-sm"
+               >
+                 All Levels
+               </button>
+               {availableLevels.map(lvl => (
+                 <button
+                   key={lvl}
+                   onClick={() => expandToLevel(lvl)}
+                   className="px-3 py-1.5 text-xs font-bold rounded-lg border border-indigo-500/20 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors whitespace-nowrap shadow-sm"
+                 >
+                   Level {lvl}
+                 </button>
+               ))}
+            </div>
           )}
         </div>
       </div>
@@ -620,7 +799,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                       className="overflow-hidden pl-2"
                     >
                       <div className="flex flex-col gap-8 py-2">
-                        {facs.map(f => renderFacilityCard(f))}
+                        {renderFacilityList(facs, `root-${loc}`)}
                       </div>
                     </motion.div>
                   )}
