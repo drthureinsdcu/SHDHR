@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, MapPin, SlidersHorizontal, UserPlus, AlertCircle, Edit2, Search, Building, MoreVertical, FileText, ChevronRight, Info, Filter, Download } from 'lucide-react';
+import { Plus, Trash2, MapPin, SlidersHorizontal, UserPlus, AlertCircle, Edit2, Search, Building, MoreVertical, FileText, ChevronRight, Info, Filter, Download, RefreshCw, ShieldCheck, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Facility, CustomQuota } from '../types';
 import FacilitySelect from './FacilitySelect';
@@ -39,9 +39,75 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isRecruitOpen, setIsRecruitOpen] = useState(false);
   const [isEditFacOpen, setIsEditFacOpen] = useState(false);
+  const [isCloneOpen, setIsCloneOpen] = useState(false);
+  const [cloneSourceFac, setCloneSourceFac] = useState<Facility | null>(null);
+  const [cloneStateLoc, setCloneStateLoc] = useState('');
+  const [cloneDistrict, setCloneDistrict] = useState('');
+  const [cloneTownship, setCloneTownship] = useState('');
+  
+  const openCloneFacility = (fac: Facility) => {
+    if (role !== 'admin') return;
+    setCloneSourceFac(fac);
+    setCloneStateLoc(fac.state);
+    setCloneDistrict(fac.district);
+    setCloneTownship(fac.township);
+    setIsCloneOpen(true);
+  };
+
+  const submitCloneFacility = async () => {
+    if (role !== 'admin') return;
+    if (!cloneSourceFac) return;
+    if (!cloneTownship && !cloneStateLoc) return alert('Please select a location to clone to.');
+
+    let currentId = Date.now();
+    
+    // Original string to replace and new string to substitute (very naive replacement)
+    const oldTownship = cloneSourceFac.township || cloneSourceFac.state || '';
+    const newTownship = cloneTownship || cloneStateLoc || '';
+
+    const replaceName = (name: string) => {
+       if (!oldTownship || !newTownship) return name;
+       return name.replace(newTownship, newTownship).replace(oldTownship, newTownship);
+    };
+
+    // recursively find all sub-facilities
+    const getDescendantsAndSelf = (parentId: number, oldIdToNewIdMap: Record<number, number>) => {
+      const result: any[] = [];
+      const traverse = (currentParentId: number, targetParentId?: number) => {
+        const children = facilities.filter(f => f.parentFacilityId === currentParentId);
+        children.forEach(c => {
+          const newFacId = ++currentId;
+          oldIdToNewIdMap[c.id] = newFacId;
+          result.push({ ...c, id: newFacId, parentFacilityId: targetParentId, name: replaceName(c.name), state: cloneStateLoc, district: cloneDistrict, township: cloneTownship });
+          traverse(c.id, newFacId);
+        });
+      };
+      return { result, traverse };
+    };
+
+    const newRootId = ++currentId;
+    const oldIdToNewIdMap: Record<number, number> = {};
+    oldIdToNewIdMap[cloneSourceFac.id] = newRootId;
+    
+    const newRootFac = { ...cloneSourceFac, id: newRootId, name: replaceName(cloneSourceFac.name), state: cloneStateLoc, district: cloneDistrict, township: cloneTownship };
+    const { result: newDescendants, traverse } = getDescendantsAndSelf(cloneSourceFac.id, oldIdToNewIdMap);
+    traverse(cloneSourceFac.id, newRootId);
+
+    const allNewFacs = [newRootFac, ...newDescendants];
+
+    for (const fac of allNewFacs) {
+       await addFacility(fac);
+    }
+
+    setIsCloneOpen(false);
+  };
+
   const [activeRecruit, setActiveRecruit] = useState<{facId: number, pos: string} | null>(null);
   const [activeFacility, setActiveFacility] = useState<Facility | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterLevel, setFilterLevel] = useState<number | 'all'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'Functioning' | 'Non-Functioning'>('all');
+  const [filterInfra, setFilterInfra] = useState<'all' | 'Standard' | 'Sub-standard'>('all');
 
   // Facility Form State
   const [fName, setFName] = useState('');
@@ -114,6 +180,46 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
     updateFacility({ ...activeFacility });
     setIsEditFacOpen(false);
   }
+
+  const [reloadConfirm, setReloadConfirm] = useState<number | null>(null);
+  const [reloadStatus, setReloadStatus] = useState<{ id: number, msg: string, type: 'success' | 'error' } | null>(null);
+
+  const reloadDefaultQuotas = async (fac: Facility) => {
+    if (role !== 'admin') {
+      setReloadStatus({ id: fac.id, msg: 'Unauthorized: Admin only', type: 'error' });
+      return;
+    }
+    const facType = (fac.type || '').trim().toLowerCase();
+    const defaults = globalDefaultQuotas.filter(q => (q.type || '').trim().toLowerCase() === facType);
+    
+    if (defaults.length === 0) {
+      setReloadStatus({ id: fac.id, msg: `No standard baseline found for type: ${fac.type}`, type: 'error' });
+      setReloadConfirm(null);
+      setTimeout(() => setReloadStatus(null), 4000);
+      return;
+    }
+
+    const newCustomQuotas: CustomQuota[] = defaults.map(d => ({
+      position: d.position,
+      max: d.max
+    }));
+
+    try {
+      const updatedFac = { ...fac, customQuotas: newCustomQuotas };
+      await updateFacility(updatedFac);
+      
+      if (activeFacility && activeFacility.id === fac.id) {
+        setActiveFacility(updatedFac);
+      }
+      
+      setReloadStatus({ id: fac.id, msg: 'Baseline Reloaded Successfully', type: 'success' });
+    } catch (err) {
+      setReloadStatus({ id: fac.id, msg: 'Database update failed', type: 'error' });
+    } finally {
+      setReloadConfirm(null);
+      setTimeout(() => setReloadStatus(null), 4000);
+    }
+  };
 
   const openRecruit = (facId: number, pos: string) => {
     setActiveRecruit({facId, pos});
@@ -218,31 +324,56 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
   const occupiedCountForRecruit = activeRecruit ? staffEntries.filter(s => s.facilityId === activeRecruit.facId && s.position === activeRecruit.pos).length : 0;
   const isOverQuota = activeQuotaDef && activeQuotaDef.max > 0 && occupiedCountForRecruit >= activeQuotaDef.max;
 
+  const matchesFilters = React.useCallback((fac: Facility) => {
+    let match = true;
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      const fullLoc = [fac.state, fac.district, fac.township].filter(Boolean).join(' ').toLowerCase();
+      match = match && (
+        fac.name.toLowerCase().includes(searchLower) ||
+        fac.type.toLowerCase().includes(searchLower) ||
+        fullLoc.includes(searchLower)
+      );
+    }
+    
+    if (filterLevel !== 'all') {
+      const type = facilityTypes.find(t => t.name === fac.type);
+      match = match && (type?.level === filterLevel);
+    }
+    
+    if (filterStatus !== 'all') {
+      match = match && ((fac.status || 'Functioning') === filterStatus);
+    }
+    
+    if (filterInfra !== 'all') {
+      match = match && ((fac.infrastructureStatus || 'Standard') === filterInfra);
+    }
+    
+    return match;
+  }, [searchTerm, filterLevel, filterStatus, filterInfra, facilityTypes]);
+
+  const isFiltering = searchTerm || filterLevel !== 'all' || filterStatus !== 'all' || filterInfra !== 'all';
+
   const rootFacilitiesToShow = React.useMemo(() => {
     return facilities.filter(f => {
       const isChild = f.parentFacilityId && f.parentFacilityId !== f.id && facilities.some(p => p.id === f.parentFacilityId);
 
-      if (!searchTerm) {
+      if (!isFiltering) {
         // Normal view: only show root facilities or those with invalid parents
         return !isChild;
       }
       
-      // Search view: check if this facility matches
-      const searchLower = searchTerm.toLowerCase();
-      const matchesSearch = (fac: Facility) => {
-        const fullLoc = [fac.state, fac.district, fac.township].filter(Boolean).join(' ').toLowerCase();
-        return fac.name.toLowerCase().includes(searchLower) ||
-          fac.type.toLowerCase().includes(searchLower) ||
-          fullLoc.includes(searchLower);
+      if (matchesFilters(f)) return true;
+      
+      // Check if any descendant matches the filter
+      const checkDescendants = (parentId: number): boolean => {
+        const children = facilities.filter(child => child.parentFacilityId === parentId);
+        if (children.some(matchesFilters)) return true;
+        return children.some(c => checkDescendants(c.id));
       };
-      
-      if (matchesSearch(f)) return true;
-      
-      // If it's a parent, also show it if any of its children match
-      const children = facilities.filter(child => child.parentFacilityId === f.id);
-      return children.some(matchesSearch);
+      return checkDescendants(f.id);
     });
-  }, [facilities, searchTerm]);
+  }, [facilities, matchesFilters]);
 
   const locationGroups = React.useMemo(() => {
     const groups: Record<string, Facility[]> = {};
@@ -432,7 +563,21 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
   };
 
   const renderFacilityCard = (f: Facility, depth = 0) => {
-    const allChildren = facilities.filter(child => child.parentFacilityId === f.id);
+    const isFiltering = searchTerm || filterLevel !== 'all' || filterStatus !== 'all' || filterInfra !== 'all';
+    
+    const allChildrenRaw = facilities.filter(child => child.parentFacilityId === f.id);
+    const allChildren = isFiltering 
+      ? allChildrenRaw.filter(c => {
+          if (matchesFilters(c)) return true;
+          const checkDescendants = (parentId: number): boolean => {
+            const ch = facilities.filter(child => child.parentFacilityId === parentId);
+            if (ch.some(matchesFilters)) return true;
+            return ch.some(cc => checkDescendants(cc.id));
+          };
+          return checkDescendants(c.id);
+        })
+      : allChildrenRaw;
+
     const subDeptTypes = state.subdepartmentsMap[f.type] || [];
     
     let subDepartments = allChildren.filter(c => subDeptTypes.includes(c.type));
@@ -461,9 +606,9 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
     const totalAttOut = staffEntries.filter(s => s.facilityId === f.id && s.currentFacilityId !== f.id).length;
     const totalAttIn = staffEntries.filter(s => s.currentFacilityId === f.id && s.facilityId !== f.id).length;
 
-    const isExpandedFacilities = expandedParents[f.id];
-    const isSubDeptsExpanded = expandedSubDepts[f.id];
-    const isCardExpanded = expandedCards[f.id] === true;
+    const isExpandedFacilities = expandedParents[f.id] === true || isFiltering;
+    const isSubDeptsExpanded = expandedSubDepts[f.id] === true || isFiltering;
+    const isCardExpanded = expandedCards[f.id] === true || isFiltering;
 
     return (
       <div key={f.id} className="flex flex-col">
@@ -472,38 +617,77 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
           layout
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className={`group bg-white ${depth > 0 ? 'rounded-xl mb-2' : 'rounded-2xl mb-3'} border border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden ${isCardExpanded ? 'ring-2 ring-emerald-500/20' : ''}`}
+          className={`group bg-white ${depth > 0 ? 'rounded-lg mb-1.5' : 'rounded-xl mb-2'} border border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden ${isCardExpanded ? 'ring-2 ring-emerald-500/20' : ''}`}
         >
-          <div className={`flex flex-col md:flex-row items-stretch md:items-center ${depth > 0 ? 'p-3 md:p-4 gap-3 md:gap-4' : 'p-5 md:p-7 gap-5 md:gap-7'} relative`}>
+          <div className={`flex flex-col md:flex-row items-stretch md:items-center ${depth > 0 ? 'p-2.5 md:p-3 gap-2 md:gap-3' : 'p-3.5 md:p-5 gap-3 md:gap-4'} relative`}>
              <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-emerald-400 to-emerald-600 hidden md:block" />
              {/* Left: Occupancy Badge & Title */}
-             <div className={`flex-1 flex flex-col justify-center ${depth > 0 ? 'gap-2' : 'gap-3'}`}>
-                <div className="flex items-center gap-2 mb-1">
-                   <div className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest ${totalOccupied >= totalQuota && totalQuota > 0 ? 'bg-emerald-100/80 text-emerald-700' : 'bg-amber-100/80 text-amber-700'}`}>
+             <div className={`flex-1 flex flex-col justify-center ${depth > 0 ? 'gap-1.5' : 'gap-2'}`}>
+                <div className="flex items-center gap-2 mb-0.5">
+                   <div className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${totalOccupied >= totalQuota && totalQuota > 0 ? 'bg-emerald-100/80 text-emerald-700' : 'bg-amber-100/80 text-amber-700'}`}>
                      {totalOccupied} / {totalQuota} OCCUPIED
                    </div>
-                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none bg-slate-100 px-2.5 py-1 rounded">{f.type}</span>
-                   {f.status === 'Non-Functioning' && <span className="text-[10px] font-bold text-red-600 uppercase tracking-widest leading-none bg-red-50 border border-red-100 px-2.5 py-1 rounded">Non-Functioning</span>}
+                   <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest leading-none bg-slate-100 px-2 py-0.5 rounded">{f.type}</span>
+                   {f.status === 'Non-Functioning' && <span className="text-[9px] font-bold text-red-600 uppercase tracking-widest leading-none bg-red-50 border border-red-100 px-2 py-0.5 rounded">Non-Functioning</span>}
                 </div>
                 
-                <div className="flex items-start gap-4">
-                   <h4 className={`${depth > 0 ? 'text-base md:text-lg' : 'text-lg md:text-xl'} font-black text-slate-900 font-display leading-snug`}>
+                <div className="flex items-start gap-3">
+                   <h4 className={`${depth > 0 ? 'text-sm md:text-base' : 'text-base md:text-lg'} font-black text-slate-900 font-display leading-tight`}>
                      {f.name}
                    </h4>
-                   <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5">
-                      <button onClick={() => toggleCard(f.id)} className={`p-2 rounded-xl border transition-all shadow-sm flex items-center justify-center ${isCardExpanded ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:border-slate-300'}`}>
-                         <span className="text-[10px] font-bold uppercase tracking-widest mr-1.5">{isCardExpanded ? 'Close' : 'Details'}</span>
-                         <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-300 ${isCardExpanded ? 'rotate-90' : ''}`} />
+                   <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <button onClick={() => toggleCard(f.id)} className={`p-1.5 rounded-lg border transition-all shadow-sm flex items-center justify-center ${isCardExpanded ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:border-slate-300'}`}>
+                         <span className="text-[9px] font-bold uppercase tracking-widest mr-1">{isCardExpanded ? 'Close' : 'Details'}</span>
+                         <ChevronRight className={`w-3 h-3 transition-transform duration-300 ${isCardExpanded ? 'rotate-90' : ''}`} />
                       </button>
                       {canEditFacility(f.township) && (
                         <>
-                          <button onClick={() => openEditFacility(f)} className="p-2 rounded-xl border bg-white border-slate-200 text-slate-500 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-600 transition-all shadow-sm">
+                          {role === 'admin' && (
+                            <div className="relative">
+                              {reloadConfirm === f.id ? (
+                                <div className="flex items-center gap-1 bg-white border border-amber-200 rounded-lg p-0.5 shadow-sm overflow-hidden animate-in fade-in slide-in-from-right-2 duration-300">
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); reloadDefaultQuotas(f); }}
+                                    className="px-1.5 py-1 text-[8px] font-black uppercase text-amber-600 hover:bg-amber-50 rounded transition-colors"
+                                  >
+                                    Confirm
+                                  </button>
+                                  <div className="w-[1px] h-3 bg-amber-100" />
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); setReloadConfirm(null); }}
+                                    className="px-1.5 py-1 text-[8px] font-black uppercase text-slate-400 hover:bg-slate-50 rounded transition-colors"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : reloadStatus?.id === f.id ? (
+                                <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[9px] font-black uppercase tracking-tight shadow-sm animate-in zoom-in duration-300 ${reloadStatus.type === 'success' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-red-50 text-red-600 border-red-100'}`}>
+                                  {reloadStatus.type === 'success' ? <ShieldCheck className="w-2.5 h-2.5" /> : <AlertCircle className="w-2.5 h-2.5" />}
+                                  {reloadStatus.msg}
+                                </div>
+                              ) : (
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); setReloadConfirm(f.id); }} 
+                                  title="Reload Default Quotas (Standard HR Baseline)"
+                                  className="p-1.5 rounded-lg border bg-white border-slate-200 text-amber-500 hover:bg-amber-50 hover:border-amber-200 hover:text-amber-600 transition-all shadow-sm"
+                                >
+                                  <RefreshCw className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          <button onClick={() => openEditFacility(f)} className="p-1.5 rounded-lg border bg-white border-slate-200 text-slate-500 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-600 transition-all shadow-sm">
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           {role === 'admin' && (
-                            <button onClick={() => safeDelete(() => deleteFacility(f.id), `ဌာန '${f.name}' ကို ဖျက်ပစ်မည်မှာ သေချာပါသလား?`)} className="p-2 rounded-xl border bg-white border-slate-200 text-slate-500 hover:bg-red-50 hover:border-red-200 hover:text-red-600 transition-all shadow-sm">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <>
+                              <button onClick={() => openCloneFacility(f)} title="Clone Facility Group" className="p-1.5 rounded-lg border bg-white border-slate-200 text-blue-500 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-600 transition-all shadow-sm">
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+                              <button onClick={() => safeDelete(() => deleteFacility(f.id), `ဌာန '${f.name}' ကို ဖျက်ပစ်မည်မှာ သေချာပါသလား?`)} className="p-1.5 rounded-lg border bg-white border-slate-200 text-slate-500 hover:bg-red-50 hover:border-red-200 hover:text-red-600 transition-all shadow-sm">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
                           )}
                         </>
                       )}
@@ -512,18 +696,18 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
              </div>
 
              {/* Right: Boxed Stats Section */}
-             <div className="grid grid-cols-3 gap-2 md:gap-3 shrink-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-100 md:ml-auto">
-                <button onClick={() => setCardFilterAndExpand(f.id, 'vacancy')} className={`bg-slate-50 border rounded-xl flex flex-col items-center justify-center transition-colors hover:bg-slate-100 ${cardFilters[f.id] === 'vacancy' ? 'ring-2 ring-red-400 border-red-200' : 'border-slate-100'} ${depth > 0 ? 'p-2 min-w-[60px]' : 'p-3 min-w-[80px]'}`}>
-                   <p className="text-[8px] md:text-[9px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Vacancy</p>
-                   <p className={`${depth > 0 ? 'text-lg' : 'text-xl'} font-black font-display leading-none ${totalVacancy > 0 ? 'text-red-500' : 'text-slate-400'}`}>{totalVacancy}</p>
+             <div className="grid grid-cols-3 gap-1.5 md:gap-2 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100 md:ml-auto">
+                <button onClick={() => setCardFilterAndExpand(f.id, 'vacancy')} className={`bg-slate-50 border rounded-lg flex flex-col items-center justify-center transition-colors hover:bg-slate-100 ${cardFilters[f.id] === 'vacancy' ? 'ring-2 ring-red-400 border-red-200' : 'border-slate-100'} ${depth > 0 ? 'p-1.5 min-w-[50px]' : 'p-2 min-w-[60px]'}`}>
+                   <p className="text-[7.5px] md:text-[8px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Vacancy</p>
+                   <p className={`${depth > 0 ? 'text-base' : 'text-lg'} font-black font-display leading-none ${totalVacancy > 0 ? 'text-red-500' : 'text-slate-400'}`}>{totalVacancy}</p>
                 </button>
-                <button onClick={() => setCardFilterAndExpand(f.id, 'attOut')} className={`bg-amber-50/50 border rounded-xl flex flex-col items-center justify-center transition-colors hover:bg-amber-50 ${cardFilters[f.id] === 'attOut' ? 'ring-2 ring-amber-400 border-amber-200' : 'border-amber-100/50'} ${depth > 0 ? 'p-2 min-w-[60px]' : 'p-3 min-w-[80px]'}`}>
-                   <p className="text-[8px] md:text-[9px] font-semibold text-amber-600/80 uppercase tracking-wider mb-1">Att Out</p>
-                   <p className={`${depth > 0 ? 'text-lg' : 'text-xl'} font-black font-display leading-none ${totalAttOut > 0 ? 'text-amber-600' : 'text-amber-300'}`}>{totalAttOut}</p>
+                <button onClick={() => setCardFilterAndExpand(f.id, 'attOut')} className={`bg-amber-50/50 border rounded-lg flex flex-col items-center justify-center transition-colors hover:bg-amber-50 ${cardFilters[f.id] === 'attOut' ? 'ring-2 ring-amber-400 border-amber-200' : 'border-amber-100/50'} ${depth > 0 ? 'p-1.5 min-w-[50px]' : 'p-2 min-w-[60px]'}`}>
+                   <p className="text-[7.5px] md:text-[8px] font-semibold text-amber-600/80 uppercase tracking-wider mb-0.5">Att Out</p>
+                   <p className={`${depth > 0 ? 'text-base' : 'text-lg'} font-black font-display leading-none ${totalAttOut > 0 ? 'text-amber-600' : 'text-amber-300'}`}>{totalAttOut}</p>
                 </button>
-                <button onClick={() => setCardFilterAndExpand(f.id, 'attIn')} className={`bg-blue-50/50 border rounded-xl flex flex-col items-center justify-center transition-colors hover:bg-blue-50 ${cardFilters[f.id] === 'attIn' ? 'ring-2 ring-blue-400 border-blue-200' : 'border-blue-100/50'} ${depth > 0 ? 'p-2 min-w-[60px]' : 'p-3 min-w-[80px]'}`}>
-                   <p className="text-[8px] md:text-[9px] font-semibold text-blue-600/80 uppercase tracking-wider mb-1">Att In</p>
-                   <p className={`${depth > 0 ? 'text-lg' : 'text-xl'} font-black font-display leading-none ${totalAttIn > 0 ? 'text-blue-600' : 'text-blue-300'}`}>{totalAttIn}</p>
+                <button onClick={() => setCardFilterAndExpand(f.id, 'attIn')} className={`bg-blue-50/50 border rounded-lg flex flex-col items-center justify-center transition-colors hover:bg-blue-50 ${cardFilters[f.id] === 'attIn' ? 'ring-2 ring-blue-400 border-blue-200' : 'border-blue-100/50'} ${depth > 0 ? 'p-1.5 min-w-[50px]' : 'p-2 min-w-[60px]'}`}>
+                   <p className="text-[7.5px] md:text-[8px] font-semibold text-blue-600/80 uppercase tracking-wider mb-0.5">Att In</p>
+                   <p className={`${depth > 0 ? 'text-base' : 'text-lg'} font-black font-display leading-none ${totalAttIn > 0 ? 'text-blue-600' : 'text-blue-300'}`}>{totalAttIn}</p>
                 </button>
              </div>
           </div>
@@ -536,7 +720,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                 exit={{ height: 0, opacity: 0 }}
                 className="border-t border-slate-50 bg-slate-50/30 overflow-hidden"
               >
-                <div className="p-5 space-y-4">
+                <div className="p-3 md:p-4 space-y-3">
                   {f.customQuotas.length === 0 ? (
                     <p className="text-center text-xs text-slate-400 py-4 font-bold italic">No positions defined for this facility.</p>
                   ) : (
@@ -564,32 +748,32 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                       const isOver = allowed > 0 && occupied > allowed;
 
                       return (
-                        <div key={q.position} className={`p-4 bg-white border rounded-xl flex flex-col gap-3 transition-shadow hover:shadow-sm ${isOver ? 'border-red-200' : 'border-slate-100'}`}>
-                          <div className="flex items-center justify-between">
+                        <div key={q.position} className={`p-2.5 bg-white border rounded-lg flex flex-col gap-2 transition-shadow hover:shadow-sm ${isOver ? 'border-red-200' : 'border-slate-100'}`}>
+                          <div className="flex justify-between items-center">
                              <span className="text-xs font-black text-slate-700 font-display">{q.position}</span>
                              {canEditFacility(f.township) && (
-                               <button onClick={() => openRecruit(f.id, q.position)} className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-slate-800 transition-all flex items-center gap-1.5 leading-none">
-                                 <Plus className="w-3 h-3" /> Recruit
+                               <button onClick={() => openRecruit(f.id, q.position)} className="px-2 py-1 bg-slate-900 text-white rounded text-[9px] font-black uppercase tracking-wider hover:bg-slate-800 transition-all flex items-center gap-1.5 leading-none">
+                                 <Plus className="w-2.5 h-2.5" /> Recruit
                                </button>
                              )}
                           </div>
                           
-                          <div className="grid grid-cols-4 gap-3 bg-slate-50/50 p-3 rounded-lg border border-slate-100/50">
-                            <div className="bg-white p-2 border border-slate-100 rounded flex flex-col items-center justify-center shadow-sm">
-                               <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 leading-none">Vacant</p>
-                               <span className={`text-base font-black ${vacancy > 0 ? 'text-red-500' : 'text-slate-300'}`}>{vacancy}</span>
+                          <div className="grid grid-cols-4 gap-1.5 md:gap-2 bg-slate-50/50 p-1.5 md:p-2 rounded-lg border border-slate-100/50">
+                            <div className="bg-white p-1 md:p-1.5 border border-slate-100 rounded flex flex-col items-center justify-center shadow-sm">
+                               <p className="text-[7.5px] md:text-[8px] font-black text-slate-500 uppercase tracking-widest mb-0.5 leading-none">Vacant</p>
+                               <span className={`text-xs md:text-sm font-black ${vacancy > 0 ? 'text-red-500' : 'text-slate-300'}`}>{vacancy}</span>
                             </div>
-                            <div className="bg-emerald-50 border border-emerald-100 p-2 rounded flex flex-col items-center justify-center shadow-sm">
-                               <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1 leading-none">Occupied</p>
-                               <span className="text-base font-black text-emerald-700">{occupied} <span className="text-emerald-400 text-xs">/ {allowed}</span></span>
+                            <div className="bg-emerald-50 border border-emerald-100 p-1 md:p-1.5 rounded flex flex-col items-center justify-center shadow-sm">
+                               <p className="text-[7.5px] md:text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-0.5 leading-none">Occupied</p>
+                               <span className="text-xs md:text-sm font-black text-emerald-700">{occupied} <span className="text-emerald-400 text-[10px]">/ {allowed}</span></span>
                             </div>
-                            <div className="bg-amber-50 border border-amber-100 p-2 rounded flex flex-col items-center justify-center shadow-sm">
-                               <p className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-1 leading-none">Att Out</p>
-                               <span className={`text-base font-black ${attachedOut > 0 ? 'text-amber-600' : 'text-amber-300'}`}>{attachedOut}</span>
+                            <div className="bg-amber-50 border border-amber-100 p-1 md:p-1.5 rounded flex flex-col items-center justify-center shadow-sm">
+                               <p className="text-[7.5px] md:text-[8px] font-black text-amber-600 uppercase tracking-widest mb-0.5 leading-none">Att Out</p>
+                               <span className={`text-xs md:text-sm font-black ${attachedOut > 0 ? 'text-amber-600' : 'text-amber-300'}`}>{attachedOut}</span>
                             </div>
-                            <div className="bg-blue-50 border border-blue-100 p-2 rounded flex flex-col items-center justify-center shadow-sm">
-                               <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1 leading-none">Att In</p>
-                               <span className={`text-base font-black ${attachedIn > 0 ? 'text-blue-600' : 'text-blue-300'}`}>{attachedIn}</span>
+                            <div className="bg-blue-50 border border-blue-100 p-1 md:p-1.5 rounded flex flex-col items-center justify-center shadow-sm">
+                               <p className="text-[7.5px] md:text-[8px] font-black text-blue-600 uppercase tracking-widest mb-0.5 leading-none">Att In</p>
+                               <span className={`text-xs md:text-sm font-black ${attachedIn > 0 ? 'text-blue-600' : 'text-blue-300'}`}>{attachedIn}</span>
                             </div>
                           </div>
 
@@ -623,17 +807,17 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                                 const actReason = staff.activeReason || '';
 
                                 return (
-                                  <div key={staff.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-white border border-slate-100 hover:border-slate-300 rounded-lg shadow-sm transition-all gap-3">
-                                    <div className="flex flex-col gap-1.5">
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-sm font-bold text-slate-700">{staff.name || `Staff #${idx + 1}`}</span>
-                                        <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${statusColor}`}>{statusText}</span>
-                                        <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${actStatus === 'Active' ? 'bg-emerald-100 text-emerald-700' : actStatus === 'Leave' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                                  <div key={staff.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-2 bg-white border border-slate-100 hover:border-slate-300 rounded-lg shadow-sm transition-all gap-2">
+                                    <div className="flex flex-col gap-1">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="text-xs md:text-sm font-bold text-slate-700">{staff.name || `Staff #${idx + 1}`}</span>
+                                        <span className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded ${statusColor}`}>{statusText}</span>
+                                        <span className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded ${actStatus === 'Active' ? 'bg-emerald-100 text-emerald-700' : actStatus === 'Leave' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
                                           {actStatus} {actReason && actStatus !== 'Active' && `(${actReason})`}
                                         </span>
                                       </div>
                                       {(isAttOut || isAttIn) && staff.reason && (
-                                        <p className="text-xs text-slate-500 font-medium">
+                                        <p className="text-[10px] md:text-xs text-slate-500 font-medium">
                                           Reason: <span className="italic">{staff.reason}</span> 
                                           {isAttOut && staff.currentFacilityId !== -1 && ` (at ${facilities.find(ff=>ff.id===staff.currentFacilityId)?.name || 'Unknown'})`}
                                           {isAttIn && staff.facilityId !== -1 && ` (from ${facilities.find(ff=>ff.id===staff.facilityId)?.name || 'Unknown'})`}
@@ -641,14 +825,15 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
                                         </p>
                                       )}
                                     </div>
-                                    <div className="flex flex-wrap items-center gap-2">
+                                    <div className="flex flex-wrap items-center gap-1.5">
                                       {staff.cvDataUrl && (
-                                        <button onClick={() => setCvPreview({ name: staff.cv || `CV_${staff.id}`, dataUrl: staff.cvDataUrl! })} className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-md text-[11px] font-bold transition-colors flex items-center gap-1.5">
+                                        <button onClick={() => setCvPreview({ name: staff.cv || `CV_${staff.id}`, dataUrl: staff.cvDataUrl! })} className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded text-[9px] font-bold transition-colors flex items-center gap-1">
+
                                           <FileText className="w-3 h-3" /> View CV
                                         </button>
                                       )}
                                       {canEditFacility(f.township) && (
-                                        <button onClick={() => openEditStaff(staff, f.id, q.position)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[11px] font-bold transition-colors flex items-center gap-1.5">
+                                        <button onClick={() => openEditStaff(staff, f.id, q.position)} className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[9px] font-bold transition-colors flex items-center gap-1">
                                           <Edit2 className="w-3 h-3" /> Edit
                                         </button>
                                       )}
@@ -735,6 +920,34 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
               </button>
             )}
           </div>
+          <div className="flex flex-col sm:flex-row gap-2 w-full xl:justify-end">
+             <select
+               value={filterLevel}
+               onChange={(e) => setFilterLevel(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+               className="p-2.5 bg-white border border-slate-200 shadow-sm rounded-xl text-sm font-medium text-slate-600 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+             >
+               <option value="all">Level အားလုံး</option>
+               {availableLevels.map(lvl => <option key={lvl} value={lvl}>Level {lvl}</option>)}
+             </select>
+             <select
+               value={filterStatus}
+               onChange={(e) => setFilterStatus(e.target.value as any)}
+               className="p-2.5 bg-white border border-slate-200 shadow-sm rounded-xl text-sm font-medium text-slate-600 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+             >
+               <option value="all">Status အားလုံး</option>
+               <option value="Functioning">Functioning</option>
+               <option value="Non-Functioning">Non-Functioning</option>
+             </select>
+             <select
+               value={filterInfra}
+               onChange={(e) => setFilterInfra(e.target.value as any)}
+               className="p-2.5 bg-white border border-slate-200 shadow-sm rounded-xl text-sm font-medium text-slate-600 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+             >
+               <option value="all">Infra Status အားလုံး</option>
+               <option value="Standard">Standard</option>
+               <option value="Sub-standard">Sub-standard</option>
+             </select>
+          </div>
           {availableLevels.length > 0 && (
             <div className="flex items-center gap-2 overflow-x-auto pb-1 custom-scroll hide-scrollbar xl:justify-end">
                <span className="text-xs font-bold text-slate-500 whitespace-nowrap">Expand to:</span>
@@ -773,7 +986,7 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
       ) : (
         <div className="flex flex-col gap-10">
           {Object.entries(locationGroups).map(([loc, facs]: [string, Facility[]]) => {
-            const isLocationExpanded = expandedLocations[loc] !== false; // expanded by default
+            const isLocationExpanded = expandedLocations[loc] === true || isFiltering; // collapsed by default unless filtering
             return (
               <div key={loc} className="flex flex-col gap-4">
                 <button 
@@ -811,6 +1024,61 @@ export default function Facilities({ state }: { state: ReturnType<typeof import(
       )}
 
       {/* MODALS */}
+      {isCloneOpen && cloneSourceFac && (
+        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-xl rounded-2xl p-6 flex flex-col shadow-xl">
+            <h3 className="text-xl font-bold text-slate-800 mb-6 border-b border-slate-100 pb-4">
+               Clone Facility Group: {cloneSourceFac.name}
+            </h3>
+            
+            <div className="space-y-4">
+              <div className="p-3 bg-blue-50 text-blue-800 rounded-lg text-sm mb-4">
+                This will duplicate <b>{cloneSourceFac.name}</b> and all its sub-facilities to the newly selected location. 
+                The location names in the facility titles will be replaced automatically.
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-500 font-medium mb-1">တိုင်းဒေသကြီး/ပြည်နယ်</label>
+                  <select value={cloneStateLoc} onChange={e=>{
+                    setCloneStateLoc(e.target.value);
+                    setCloneDistrict('');
+                    setCloneTownship('');
+                  }} disabled={role === 'manager' && !!allowedTownship} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500 disabled:opacity-50 disabled:bg-slate-50">
+                    <option value="">ရွေးချယ်ပါ...</option>
+                    {state.locations.map(r => <option key={r.name} value={r.name}>{r.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 font-medium mb-1">ခရိုင်</label>
+                  <select value={cloneDistrict} onChange={e=>{
+                    setCloneDistrict(e.target.value);
+                    setCloneTownship('');
+                  }} disabled={!cloneStateLoc || (role === 'manager' && !!allowedTownship)} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500 disabled:opacity-50 disabled:bg-slate-50">
+                    <option value="">ရွေးချယ်ပါ...</option>
+                    {cloneStateLoc && state.locations.find(r => r.name === cloneStateLoc)?.districts.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-500 font-medium mb-1">မြို့နယ်</label>
+                  <select value={cloneTownship} onChange={e=>setCloneTownship(e.target.value)} disabled={!cloneDistrict || (role === 'manager' && !!allowedTownship)} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-emerald-500 disabled:opacity-50 disabled:bg-slate-50">
+                    <option value="">ရွေးချယ်ပါ...</option>
+                    {cloneDistrict && state.locations.find(r => r.name === cloneStateLoc)?.districts.find(d => d.name === cloneDistrict)?.townships.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+            
+            <div className="mt-8 pt-4 border-t border-slate-100 flex justify-end gap-3">
+               <button onClick={() => setIsCloneOpen(false)} className="px-5 py-2.5 text-slate-500 font-bold hover:bg-slate-50 rounded-xl transition-colors">Cancel</button>
+               <button onClick={submitCloneFacility} className="px-5 py-2.5 bg-blue-500 text-white font-bold rounded-xl hover:bg-blue-600 transition-colors shadow-sm">Clone Now</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isAddOpen && (
         <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-xl rounded-2xl p-6 flex flex-col max-h-[90vh] shadow-xl">

@@ -85,7 +85,9 @@ export default function StaffList({ state }: { state: ReturnType<typeof import('
     setIsEditorOpen(true);
   };
 
-  const saveStaff = () => {
+  const [overQuotaConfirm, setOverQuotaConfirm] = useState<{ msg: string, action: () => void } | null>(null);
+
+  const saveStaff = (isOverriding = false) => {
     if (!eStaffName.trim()) return alert('Please enter staff name');
     if (!eCurrFac) return alert('Please select current facility');
     if (!ePos) return alert('Please select position');
@@ -103,16 +105,18 @@ export default function StaffList({ state }: { state: ReturnType<typeof import('
         }
     }
     
-    if (!eId && facId !== -1) {
+    if (!eId && facId !== -1 && !isOverriding) {
         const targetFac = facilities.find(f => f.id === facId);
         if (targetFac) {
             const quota = targetFac.customQuotas.find(q => q.position === ePos);
             if (quota) {
                 const occupied = state.staffEntries.filter(s => s.facilityId === facId && s.position === ePos).length;
                 if (occupied >= quota.max) {
-                     if (!window.confirm(`သတိပေးချက်: ဤဌာနအတွက် ${ePos} ရာထူး သတ်မှတ်အရေအတွက် (${quota.max}) ပြည့်နေပါသည်။ ဆက်လက်ထည့်သွင်းလိုပါသလား?`)) {
-                         return;
-                     }
+                     setOverQuotaConfirm({
+                         msg: `သတိပေးချက်: ဤဌာနအတွက် ${ePos} ရာထူး သတ်မှတ်အရေအတွက် (${quota.max}) ပြည့်နေပါသည်။ ဆက်လက်ထည့်သွင်းလိုပါသလား?`,
+                         action: () => saveStaff(true)
+                     });
+                     return;
                 }
             }
         }
@@ -137,6 +141,7 @@ export default function StaffList({ state }: { state: ReturnType<typeof import('
     else state.addStaff(staffData);
     
     setIsEditorOpen(false);
+    setOverQuotaConfirm(null);
   };
 
   // Delete confirm state
@@ -458,6 +463,29 @@ export default function StaffList({ state }: { state: ReturnType<typeof import('
           </div>
         )
       })()}
+
+      {overQuotaConfirm && (
+        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[70] p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-xl border border-amber-100">
+            <h3 className="text-lg font-bold text-amber-800 mb-2 font-display">Quota Warning</h3>
+            <p className="text-sm text-slate-600 mb-6 font-medium">{overQuotaConfirm.msg}</p>
+            <div className="flex justify-end gap-3">
+              <button 
+                onClick={() => setOverQuotaConfirm(null)} 
+                className="px-5 py-2.5 text-[13px] font-bold text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                ပယ်ဖျက်မည်
+              </button>
+              <button 
+                onClick={() => overQuotaConfirm.action()} 
+                className="bg-amber-600 text-white px-6 py-2.5 rounded-xl text-[13px] font-bold hover:bg-amber-700 transition-all shadow-lg shadow-amber-100 active:scale-95"
+              >
+                ဆက်လက်ဆောင်ရွက်မည်
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteConfirm && (
         <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[60] p-4 backdrop-blur-sm animate-in fade-in">

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronRight, ChevronDown, List, Network, Building2 } from 'lucide-react';
+import { ChevronRight, ChevronDown, List, Network, Building2, ZoomIn, ZoomOut, Maximize2, Minimize2, RotateCcw } from 'lucide-react';
 import { Facility, Staff } from '../types';
 
 interface OrgChartProps {
@@ -14,6 +14,32 @@ export default function OrganizationChart({ facilities, staffEntries, subdepartm
   const [modalData, setModalData] = useState<{ facility: Facility, type: 'local' | 'overall' } | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<Record<string | number, boolean>>({});
   const [expandedSubDepts, setExpandedSubDepts] = useState<Record<string | number, boolean>>({});
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+        setIsFullscreen(true); // Fallback to CSS fullscreen
+      });
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
+  // Add fullscreen change listener to sync state if exited via Esc key
+  React.useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   const sortByLevel = (a: Facility, b: Facility) => {
     const typeA = facilityTypes?.find(t => t.name === a.type);
@@ -24,19 +50,24 @@ export default function OrganizationChart({ facilities, staffEntries, subdepartm
   };
 
   const rootFacilities = facilities
-    .filter(f => !f.parentFacilityId)
+    .filter(f => !f.parentFacilityId || f.parentFacilityId === 0 || f.parentFacilityId === -1)
     .sort(sortByLevel);
 
   const availableLevels = React.useMemo(() => {
     const levels = new Set<number>();
     facilities.forEach(f => {
       const type = facilityTypes?.find(t => t.name === f.type);
-      if (type?.level !== undefined) {
+      if (type?.level !== undefined && type?.level !== null) {
         levels.add(type.level);
       }
     });
     return Array.from(levels).sort((a, b) => a - b);
   }, [facilities, facilityTypes]);
+
+  const collapseAll = () => {
+    setExpandedNodes({});
+    setExpandedSubDepts({});
+  };
 
   const expandToLevel = (targetLevel: number) => {
     const newState: Record<string | number, boolean> = {};
@@ -44,13 +75,17 @@ export default function OrganizationChart({ facilities, staffEntries, subdepartm
     facilities.forEach(f => {
       const type = facilityTypes?.find(t => t.name === f.type);
       const level = type?.level ?? 999;
-      newState[f.id] = level < targetLevel;
+      
       if (level < targetLevel) {
-        // Expand the corresponding level groups too
+        newState[f.id] = true;
+        // Expand parent group keys up to this level
         availableLevels.forEach(lvl => {
           if (lvl <= targetLevel) {
              newState[`${f.id}-level-${lvl}`] = true;
              newState[`root-level-${lvl}`] = true;
+             // Also need to expand the group containing THIS facility if it's level < targetLevel
+             const parentId = f.parentFacilityId || 'root';
+             newState[`${parentId}-level-${level}`] = true;
           }
         });
       }
@@ -296,38 +331,68 @@ export default function OrganizationChart({ facilities, staffEntries, subdepartm
     );
   };
 
+  const handleZoomIn = () => setZoomLevel(z => Math.min(z + 0.1, 2));
+  const handleZoomOut = () => setZoomLevel(z => Math.max(z - 0.1, 0.4));
+  const resetZoom = () => setZoomLevel(1);
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+    <div ref={containerRef} className={isFullscreen ? "fixed inset-0 z-50 bg-slate-50/95 backdrop-blur-sm overflow-hidden flex flex-col p-4 sm:p-6" : "space-y-6"}>
+      <div className="flex flex-col xl:flex-row sm:items-start xl:items-center justify-between gap-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-200 shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-2 h-8 bg-[#0e7db8] rounded-full" />
           <h3 className="text-xl font-black text-slate-900 font-display">ဌာန ဖွဲ့စည်းပုံ အဆင့်ဆင့် (Line Facilities Structure)</h3>
         </div>
         
-        {availableLevels.length > 0 && (
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 custom-scroll hide-scrollbar">
-             <span className="text-xs font-bold text-slate-500 whitespace-nowrap">Expand to:</span>
-             <button
-                onClick={expandAll}
-                className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition-colors whitespace-nowrap"
-             >
-               All Levels
-             </button>
-             {availableLevels.map(lvl => (
+        <div className="flex items-center gap-4 flex-wrap xl:flex-nowrap">
+          {availableLevels.length > 0 && (
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 custom-scroll hide-scrollbar">
+               <span className="text-xs font-bold text-slate-500 whitespace-nowrap">Expand to:</span>
                <button
-                 key={lvl}
-                 onClick={() => expandToLevel(lvl)}
-                 className="px-3 py-1.5 text-xs font-bold rounded-lg border border-[#0e7db8]/20 bg-[#0e7db8]/5 text-[#0e7db8] hover:bg-[#0e7db8]/10 transition-colors whitespace-nowrap"
+                  onClick={collapseAll}
+                  className="px-3 py-1.5 text-xs font-bold rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors whitespace-nowrap"
                >
-                 Level {lvl}
+                 Collapse All
                </button>
-             ))}
+               <button
+                  onClick={expandAll}
+                  className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition-colors whitespace-nowrap"
+               >
+                 Expand All
+               </button>
+               {availableLevels.map(lvl => (
+                 <button
+                   key={lvl}
+                   onClick={() => expandToLevel(lvl)}
+                   className="px-3 py-1.5 text-xs font-bold rounded-lg border border-[#0e7db8]/20 bg-[#0e7db8]/5 text-[#0e7db8] hover:bg-[#0e7db8]/10 transition-colors whitespace-nowrap"
+                 >
+                   Level {lvl}
+                 </button>
+               ))}
+            </div>
+          )}
+          
+          <div className="flex items-center gap-2 xl:border-l border-slate-200 xl:pl-4">
+            <button onClick={handleZoomOut} className="p-1.5 bg-slate-100 text-slate-600 rounded-md hover:bg-slate-200 transition-colors" title="Zoom Out">
+              <ZoomOut className="w-4 h-4" />
+            </button>
+            <button onClick={resetZoom} className="p-1.5 bg-slate-100 text-slate-600 rounded-md hover:bg-slate-200 transition-colors text-xs font-bold w-12 text-center" title="Reset Zoom">
+              {Math.round(zoomLevel * 100)}%
+            </button>
+            <button onClick={handleZoomIn} className="p-1.5 bg-slate-100 text-slate-600 rounded-md hover:bg-slate-200 transition-colors" title="Zoom In">
+              <ZoomIn className="w-4 h-4" />
+            </button>
+            <button onClick={toggleFullscreen} className={`ml-2 p-1.5 rounded-md transition-colors ${isFullscreen ? 'bg-[#0e7db8] text-white hover:bg-[#0e7db8]/90 shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`} title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
+              {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            </button>
           </div>
-        )}
+        </div>
       </div>
 
-      <div className="bg-white/80 rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-10 custom-scroll overflow-x-auto">
-        <div className="org-tree inline-block min-w-full">
+      <div className={`bg-white/80 rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-10 custom-scroll overflow-auto ${isFullscreen ? 'flex-1 mt-6' : ''}`}>
+        <div 
+          className="org-tree inline-block min-w-full origin-top-left transition-transform duration-200"
+          style={{ transform: `scale(${zoomLevel})` }}
+        >
           {rootFacilities.length > 0 ? (
             renderFacilityList(rootFacilities, 'root')
           ) : (

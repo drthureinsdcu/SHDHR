@@ -48,10 +48,21 @@ export default function Dashboard({ state }: { state: ReturnType<typeof import('
   // 3. Over-Quota/Surplus Details
   const overQuotaDetails: { facName: string, position: string, surplus: number }[] = [];
 
+  const resolveLocation = (fac: any): string => {
+    let current = fac;
+    while (current) {
+      if (current.township || current.state) {
+        return [current.state, current.district, current.township].filter(Boolean).join(' • ');
+      }
+      current = facilities.find((p: any) => p.id === current.parentFacilityId);
+    }
+    return 'Unspecified Location';
+  };
+
   facilities.forEach(f => {
     if (!quotaByFacType[f.type]) quotaByFacType[f.type] = { quota: 0, occupied: 0 };
     
-    const loc = f.township ? `${f.township} (${f.state})` : f.state || 'Unknown Location';
+    const loc = resolveLocation(f);
     
     (f.customQuotas || []).forEach(q => {
       const occupied = staffEntries.filter(s => s.facilityId === f.id && s.position === q.position).length;
